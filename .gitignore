@@ -1,0 +1,9 @@
+.build/
+.build/debug/
+.build/release/
+.build/checkouts/
+.swiftpm/
+Package.resolved
+*.xcworkspace
+*.xcodeproj
+DerivedData/
