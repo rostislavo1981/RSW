@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
@@ -28,7 +29,10 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var launchAtLogin: Bool {
-        didSet { save() }
+        didSet {
+            save()
+            applyLaunchAtLogin()
+        }
     }
 
     private let defaults = UserDefaults.standard
@@ -63,10 +67,30 @@ final class AppSettings: ObservableObject {
         self.manualSwitchModifiers = defs.integer(forKey: Keys.manualSwitchModifiers)
         self.excludedKeys = defs.array(forKey: Keys.excludedKeys) as? [Int] ?? [56, 60, 61]
         self.launchAtLogin = defs.bool(forKey: Keys.launchAtLogin)
+
+        // Привести сохранённый флаг к фактическому состоянию системы:
+        // пользователь мог изменить автозапуск через System Settings.
+        let actuallyEnabled = SMAppService.mainApp.status == .enabled
+        if actuallyEnabled != self.launchAtLogin {
+            self.launchAtLogin = actuallyEnabled
+        }
     }
 
     func isExcludedKey(_ keyCode: Int) -> Bool {
         excludedKeys.contains(keyCode)
+    }
+
+    private func applyLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if launchAtLogin {
+                if service.status != .enabled { try service.register() }
+            } else {
+                if service.status == .enabled { try service.unregister() }
+            }
+        } catch {
+            fputs("[rsw] launchAtLogin error: \(error.localizedDescription)\n", stderr)
+        }
     }
 
     func save() {

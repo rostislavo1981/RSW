@@ -12,7 +12,10 @@ final class KeyboardMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var currentWord = ""
 
-    var isEnabled = true
+    var isEnabled: Bool {
+        get { AppSettings.shared.autoSwitchEnabled }
+        set { AppSettings.shared.autoSwitchEnabled = newValue }
+    }
 
     func start() -> Bool {
         guard eventTap == nil else { return true }

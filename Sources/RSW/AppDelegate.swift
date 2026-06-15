@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var enabledItem: NSMenuItem!
     private var lastCorrection: (source: String, converted: String, language: KeyboardLanguage)?
     private var settingsWindow: NSWindow?
+    private var tooltipResetTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -16,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.onCorrection = { [weak self] source, replacement, language in
             self?.lastCorrection = (source: source, converted: replacement, language: language)
             fputs("[rswitcher] onCorrection: '\(source)' → '\(replacement)'\n", stderr)
+            if AppSettings.shared.showTooltip {
+                self?.showCorrectionTooltip(source: source, replacement: replacement)
+            }
         }
 
         requestAccessibilityPermission()
@@ -44,7 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         )
         enabledItem.target = self
-        enabledItem.state = .on
+        enabledItem.state = monitor.isEnabled ? .on : .off
+        statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎−"
         menu.addItem(enabledItem)
 
         menu.addItem(NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ","))
@@ -130,6 +135,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showAlert(message: "«\(word)» добавлено в русский словарь.")
         } else {
             showAlert(message: "Не удалось определить язык слова «\(word)».")
+        }
+    }
+
+    private func showCorrectionTooltip(source: String, replacement: String) {
+        guard let button = statusItem.button else { return }
+        tooltipResetTimer?.invalidate()
+        button.title = "⌨︎ \(replacement)"
+        let restored = monitor.isEnabled ? "⌨︎" : "⌨︎−"
+        tooltipResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { _ in
+            button.title = restored
         }
     }
 
