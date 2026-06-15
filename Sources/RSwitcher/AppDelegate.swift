@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var enabledItem: NSMenuItem!
     private var lastCorrection: (source: String, converted: String, language: KeyboardLanguage)?
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -14,20 +15,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         monitor.onCorrection = { [weak self] source, replacement, language in
             self?.lastCorrection = (source: source, converted: replacement, language: language)
+            fputs("[rswitcher] onCorrection: '\(source)' → '\(replacement)'\n", stderr)
         }
 
         requestAccessibilityPermission()
+
+        let trusted = AXIsProcessTrusted()
+        fputs("[rswitcher] Accessibility trusted: \(trusted)\n", stderr)
+
         if !monitor.start() {
             statusItem.button?.title = "⌨︎!"
+            fputs("[rswitcher] FAILED to create event tap\n", stderr)
+        } else {
+            fputs("[rswitcher] Event tap created OK\n", stderr)
         }
     }
 
     private func configureMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "⌨︎"
-        statusItem.button?.toolTip = "Tiny Switcher"
+        statusItem.button?.toolTip = "rswitcher"
 
         let menu = NSMenu()
+
         enabledItem = NSMenuItem(
             title: "Автопереключение",
             action: #selector(toggleEnabled),
@@ -36,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enabledItem.target = self
         enabledItem.state = .on
         menu.addItem(enabledItem)
+
+        menu.addItem(NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem.separator())
 
         let addLastItem = NSMenuItem(
             title: "Добавить последнее слово в словарь",
@@ -54,15 +67,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(addCustomItem)
 
         menu.addItem(NSMenuItem.separator())
-
-        let permissionItem = NSMenuItem(
-            title: "Открыть настройки Accessibility",
-            action: #selector(openAccessibilitySettings),
-            keyEquivalent: ""
-        )
-        permissionItem.target = self
-        menu.addItem(permissionItem)
-        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Выйти", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
@@ -71,6 +75,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.isEnabled.toggle()
         enabledItem.state = monitor.isEnabled ? .on : .off
         statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎−"
+    }
+
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            let settingsView = SettingsView()
+            let hostingController = NSHostingController(rootView: settingsView)
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "rswitcher — Настройки"
+            window.styleMask = [.titled, .closable]
+            window.center()
+            settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func addLastToDictionary() {
@@ -125,11 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
-
-    @objc private func openAccessibilitySettings() {
-        let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        )!
-        NSWorkspace.shared.open(url)
-    }
 }
+
+import SwiftUI
