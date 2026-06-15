@@ -7,3 +7,5 @@ Package.resolved
 *.xcworkspace
 *.xcodeproj
 DerivedData/
+.DS_Store
+**/.DS_Store
