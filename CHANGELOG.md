@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.2] — 2026-06-16
 
 ### Fixed
 - `autoSwitchEnabled`: тумблер меню и настройка были рассинхронизированы —
