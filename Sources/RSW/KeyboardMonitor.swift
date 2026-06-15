@@ -53,7 +53,6 @@ final class KeyboardMonitor {
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            fputs("[rswitcher] WARNING: tap disabled, re-enabling\n", stderr)
             if let eventTap { CGEvent.tapEnable(tap: eventTap, enable: true) }
             return Unmanaged.passUnretained(event)
         }
@@ -114,56 +113,17 @@ final class KeyboardMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        fputs("[rswitcher] word='\(word)' delim='\(text)'\n", stderr)
         guard let correction = converter.convert(word) else {
             return Unmanaged.passUnretained(event)
         }
 
-        fputs("[rswitcher] CORRECT: '\(word)' → '\(correction.text)' (\(correction.language))\n", stderr)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.replaceViaAX(word: word, replacement: correction.text, delimiter: text)
+            fputs("[RSW] \(word) → \(correction.text) (\(correction.language))\n", stderr)
+        DispatchQueue.main.async { [weak self] in
+            self?.applyCorrection(word: word, replacement: correction.text, delimiter: text)
             self?.inputSources.select(correction.language)
             self?.onCorrection?(word, correction.text, correction.language)
         }
         return Unmanaged.passUnretained(event)
-    }
-
-    private func manualSwitchSelectedText() {
-        let systemWide = AXUIElementCreateSystemWide()
-
-        var focusedValue: AnyObject?
-        let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue)
-        guard result == .success, let focused = focusedValue as! AXUIElement? else { return }
-
-        var selectedRange: AnyObject?
-        let rangeResult = AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &selectedRange)
-
-        var currentValue: AnyObject?
-        let valResult = AXUIElementCopyAttributeValue(focused, kAXValueAttribute as CFString, &currentValue)
-        guard valResult == .success, let value = currentValue as? String else { return }
-
-        if rangeResult == .success, let rangeVal = selectedRange as? NSRange, rangeVal.location != NSNotFound, rangeVal.length > 0 {
-            let selectedText = (value as NSString).substring(with: rangeVal)
-            if let conversion = converter.forceConvert(selectedText) {
-                let mutableValue = NSMutableString(string: value)
-                mutableValue.replaceCharacters(in: rangeVal, with: conversion.text)
-                AXUIElementSetAttributeValue(focused, kAXValueAttribute as CFString, mutableValue)
-                inputSources.select(conversion.language)
-            }
-        } else {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            let words = trimmed.split(separator: " ")
-            if let lastWord = words.last, let conversion = converter.forceConvert(String(lastWord)) {
-                let mutableValue = NSMutableString(string: value)
-                let searchRange = NSRange(location: 0, length: mutableValue.length)
-                let foundRange = mutableValue.range(of: String(lastWord), options: .backwards, range: searchRange)
-                if foundRange.location != NSNotFound {
-                    mutableValue.replaceCharacters(in: foundRange, with: conversion.text)
-                    AXUIElementSetAttributeValue(focused, kAXValueAttribute as CFString, mutableValue)
-                    inputSources.select(conversion.language)
-                }
-            }
-        }
     }
 
     private func eventText(_ event: CGEvent) -> String? {
@@ -171,45 +131,72 @@ final class KeyboardMonitor {
         event.keyboardGetUnicodeString(maxStringLength: 0, actualStringLength: &length, unicodeString: nil)
         guard length > 0 else { return nil }
         var buffer = [UniChar](repeating: 0, count: length)
-        event.keyboardGetUnicodeString(
-            maxStringLength: length,
-            actualStringLength: &length,
-            unicodeString: &buffer
-        )
+        event.keyboardGetUnicodeString(maxStringLength: length, actualStringLength: &length, unicodeString: &buffer)
         return String(utf16CodeUnits: buffer, count: length)
     }
 
-    private func replaceViaAX(word: String, replacement: String, delimiter: String) {
-        let systemWide = AXUIElementCreateSystemWide()
+    private func applyCorrection(word: String, replacement: String, delimiter: String) {
+        let totalBackspaces = word.count + delimiter.count
 
-        var focusedValue: AnyObject?
-        let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue)
-        guard result == .success, let focused = focusedValue else {
-            fputs("[rswitcher] AX: no focused element\n", stderr)
-            return
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
+            self.postBackspaces(totalBackspaces)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self.postText(replacement + delimiter)
+            }
         }
+    }
+
+    private func postBackspaces(_ count: Int) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for _ in 0..<count {
+            if let down = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: true),
+               let up = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: false) {
+                down.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+                up.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+                down.post(tap: .cgSessionEventTap)
+                up.post(tap: .cgSessionEventTap)
+            }
+        }
+    }
+
+    private func postText(_ text: String) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for char in text {
+            let utf16 = Array(String(char).utf16)
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { continue }
+            down.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+            up.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        }
+    }
+
+    private func manualSwitchSelectedText() {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+              let focused = focusedValue else { return }
+
+        var selectedRange: AnyObject?
+        let rangeResult = AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedRange)
 
         var currentValue: AnyObject?
-        let valResult = AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, &currentValue)
-        guard valResult == .success, let value = currentValue as? String else {
-            fputs("[rswitcher] AX: cannot read value\n", stderr)
-            return
-        }
+        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, &currentValue) == .success,
+              let value = currentValue as? String else { return }
 
-        fputs("[rswitcher] AX value: '\(value)'\n", stderr)
-
-        let target = word + delimiter
-        guard let range = value.range(of: target) else {
-            fputs("[rswitcher] AX: target '\(target)' not found in value\n", stderr)
-            return
-        }
-
-        let newValue = value.replacingCharacters(in: range, with: replacement + delimiter)
-        fputs("[rswitcher] AX new value: '\(newValue)'\n", stderr)
-
-        let setResult = AXUIElementSetAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, newValue as CFTypeRef)
-        if setResult != .success {
-            fputs("[rswitcher] AX: setValue failed (\(setResult.rawValue))\n", stderr)
+        if rangeResult == .success, let rangeVal = selectedRange as? NSRange, rangeVal.location != NSNotFound, rangeVal.length > 0 {
+            let selectedText = (value as NSString).substring(with: rangeVal)
+            if let conversion = converter.forceConvert(selectedText) {
+                let mutableValue = NSMutableString(string: value)
+                mutableValue.replaceCharacters(in: rangeVal, with: conversion.text)
+                AXUIElementSetAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, mutableValue)
+                inputSources.select(conversion.language)
+            }
         }
     }
 }

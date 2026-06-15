@@ -3,16 +3,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "RSwitcher",
+    name: "RSW",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "rswitcher", targets: ["RSwitcher"]),
-        .executable(name: "rswitcher-tests", targets: ["TestRunner"])
+        .executable(name: "rsw", targets: ["RSW"])
     ],
     targets: [
         .target(name: "SwitcherCore"),
         .executableTarget(
-            name: "RSwitcher",
+            name: "RSW",
             dependencies: ["SwitcherCore"]
         ),
         .executableTarget(

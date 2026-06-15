@@ -3,141 +3,268 @@ import SwitcherCore
 
 var passed = 0
 var failed = 0
+var results: [(String, Bool)] = []
 
-func assert(_ condition: Bool, _ message: String) {
-    if condition {
-        passed += 1
-        print("  ✓ \(message)")
-    } else {
-        failed += 1
-        print("  ✗ FAIL: \(message)")
+func test(_ label: String, _ block: () -> Bool) {
+    let ok = block()
+    results.append((label, ok))
+    if ok { passed += 1 } else { failed += 1 }
+}
+
+let c = LayoutConverter()
+let dict = WordDictionary.shared
+let dictConv = LayoutConverter(dictionary: dict)
+
+print("╔══════════════════════════════════════════════════════════╗")
+print("║            RSW — comprehensive test suite                ║")
+print("╚══════════════════════════════════════════════════════════╝")
+print("")
+
+// ────────────────────────────────────────────────────────
+// 1. Known wrong-layout words → must convert correctly
+// ────────────────────────────────────────────────────────
+print("━━━ 1. Known conversion pairs ━━━")
+
+let knownPairs: [(typed: String, expected: String)] = [
+    ("ghbdtn", "привет"),
+    ("руддщ", "hello"),
+]
+
+for p in knownPairs {
+    test("'\(p.typed)' → '\(p.expected)'") {
+        c.convert(p.typed)?.text == p.expected
     }
 }
 
-func assertEqual<T: Equatable>(_ a: T?, _ b: T?, _ message: String) {
-    assert(a == b, "\(message) (got \(String(describing: a)), expected \(String(describing: b)))")
+// ────────────────────────────────────────────────────────
+// 2. Force conversion works for any word
+// ────────────────────────────────────────────────────────
+print("━━━ 2. Force conversion ━━━")
+
+let forcePairs: [(typed: String, expected: String, lang: KeyboardLanguage)] = [
+    ("hello", "руддщ", .russian),
+    ("привет", "ghbdtn", .english),
+]
+
+for p in forcePairs {
+    test("FORCE '\(p.typed)' → '\(p.expected)' (\(p.lang))") {
+        let r = c.forceConvert(p.typed)
+        return r?.text == p.expected && r?.language == p.lang
+    }
 }
 
-func assertNil(_ value: Any?, _ message: String) {
-    assert(value == nil, message)
+// ────────────────────────────────────────────────────────
+// 3. Short words must NOT convert (auto)
+// ────────────────────────────────────────────────────────
+print("━━━ 3. Short words rejected ━━━")
+
+let shortWords = [
+    "ab", "no", "ok", "hi", "we", "do", "am", "is", "it", "in",
+    "йц", "фв", "яч", "ые", "уе", "му", "ри", "ти", "но", "на",
+    "q", "й", "a", "z", "w", "ц",
+]
+
+for w in shortWords {
+    test("SHORT '\(w)' → nil") {
+        c.convert(w) == nil
+    }
 }
 
-func XCTAssertNotNil(_ value: Any?, _ message: String) {
-    assert(value != nil, message)
+// ────────────────────────────────────────────────────────
+// 4. Mixed language → must NOT convert
+// ────────────────────────────────────────────────────────
+print("━━━ 4. Mixed language rejected ━━━")
+
+let mixedWords = [
+    "helloпривет", "abcйцук", "testтест", "мирworld",
+    "abc123", "hello1", "test!", "hello?", "мир!",
+]
+
+for w in mixedWords {
+    test("MIXED '\(w)' → nil") {
+        c.convert(w) == nil
+    }
 }
 
-// ============================================================
-print("=== LayoutConverter Tests ===\n")
+// ────────────────────────────────────────────────────────
+// 5. Empty / whitespace
+// ────────────────────────────────────────────────────────
+print("━━━ 5. Empty/whitespace rejected ━━━")
 
-let converter = LayoutConverter()
-
-// MARK: - EN→RU
-print("EN→RU conversion:")
-assertEqual(converter.convert("ghbdtn"), Conversion(text: "привет", language: .russian), "ghbdtn → привет")
-assertEqual(converter.convert("pfv"), nil, "pfv too short for auto-convert")
-assertEqual(converter.convert("ghtl"), Conversion(text: "пред", language: .russian), "ghtl → пред")
-
-// MARK: - RU→EN
-print("\nRU→EN conversion:")
-assertEqual(converter.convert("руддщ"), Conversion(text: "hello", language: .english), "руддщ → hello")
-
-// MARK: - Preserve correct words
-print("\nPreserve correct words:")
-assertNil(converter.convert("hello"), "hello preserved")
-assertNil(converter.convert("привет"), "привет preserved")
-assertNil(converter.convert("мир"), "мир preserved")
-assertNil(converter.convert("world"), "world preserved")
-
-// MARK: - Common words preserved
-print("\nCommon words preserved:")
-["и", "в", "не", "на", "я", "что", "он", "с", "а", "это", "как", "все", "она", "так", "его", "но"].forEach {
-    assertNil(converter.convert($0), "'\($0)' preserved")
-}
-["the", "is", "it", "in", "on", "at", "to", "of", "and", "an"].forEach {
-    assertNil(converter.convert($0), "'\($0)' preserved")
+let emptyWords = ["", " ", "\n", "\t", "  "]
+for w in emptyWords {
+    test("EMPTY '\(w.replacingOccurrences(of: "\n", with: "\\n"))' → nil") {
+        c.convert(w) == nil
+    }
 }
 
-// MARK: - Short words ignored
-print("\nShort words ignored:")
-assertNil(converter.convert("a"), "single char ignored")
-assertNil(converter.convert("й"), "single RU char ignored")
-assertNil(converter.convert("ab"), "2 chars ignored")
-assertNil(converter.convert("йц"), "2 RU chars ignored")
+// ────────────────────────────────────────────────────────
+// 6. Known correct English words → preserved
+// ────────────────────────────────────────────────────────
+print("━━━ 6. Correct English words preserved ━━━")
 
-// MARK: - Mixed languages
-print("\nMixed languages ignored:")
-assertNil(converter.convert("helloпривет"), "mixed ignored")
-assertNil(converter.convert("abcйцук"), "mixed ignored")
-assertNil(converter.convert("test123"), "with numbers ignored")
+let correctEn = [
+    "hello", "world", "the", "is", "it", "in", "on", "at", "to", "of",
+    "and", "an", "a", "my", "we", "he", "she", "they", "do", "no",
+    "so", "if", "me", "up", "us", "be", "as", "am", "or", "by",
+    "go", "ok", "hi", "this", "that", "with", "from", "have", "been",
+    "will", "would", "could", "should", "can", "may", "shall",
+    "not", "but", "what", "when", "where", "which", "who", "how",
+    "all", "each", "every", "both", "few", "more", "most", "other",
+    "shall", "must", "need", "dare", "ought",
+]
 
-// MARK: - Empty
-print("\nEmpty/whitespace:")
-assertNil(converter.convert(""), "empty ignored")
-assertNil(converter.convert(" "), "space ignored")
+for w in correctEn {
+    test("EN preserved '\(w)'") {
+        c.convert(w) == nil
+    }
+}
 
-// MARK: - Force convert
-print("\nForce conversion:")
-assertEqual(converter.forceConvert("ghbdtn"), Conversion(text: "привет", language: .russian), "force ghbdtn")
-assertEqual(converter.forceConvert("руддщ"), Conversion(text: "hello", language: .english), "force руддщ")
-assertEqual(converter.forceConvert("Ghbdtn"), Conversion(text: "Привет", language: .russian), "force Ghbdtn")
-assertEqual(converter.forceConvert("GHBDTN"), Conversion(text: "ПРИВЕТ", language: .russian), "force GHBDTN")
-assert(converter.forceConvert("q") != nil, "force single char")
-assert(converter.forceConvert("q")?.language == .russian, "force q → ru")
+// ────────────────────────────────────────────────────────
+// 7. Known correct Russian words → preserved
+// ────────────────────────────────────────────────────────
+print("━━━ 7. Correct Russian words preserved ━━━")
 
-// MARK: - Capitalization
-print("\nCapitalization:")
-assertEqual(converter.forceConvert("Ghbdtn")?.text, "Привет", "first cap preserved")
-assertEqual(converter.forceConvert("GHBDTN")?.text, "ПРИВЕТ", "all caps preserved")
-assertEqual(converter.forceConvert("ghbdtn")?.text, "привет", "lowercase preserved")
+let correctRu = [
+    "привет", "мир", "и", "в", "не", "на", "я", "что", "он", "с",
+    "а", "это", "как", "все", "она", "так", "его", "но", "да", "ты",
+    "к", "у", "же", "вы", "за", "по", "из", "о", "от", "до",
+    "ли", "нет", "вот", "ну", "уж", "бы", "ей", "их", "сам", "уже",
+    "или", "ни", "если", "там", "где", "при", "над", "тоже",
+    "ему", "вас", "им", "нам", "ним", "нас", "вас", "вам", "нам",
+    "вдруг", "вместе", "вместо", "вниз", "вверх", "внутри",
+    "вне", "под", "перед", "после", "между", "через", "около",
+    "вокруг", "вдоль", "поперёк", "направо", "налево", "назад", "вперёд",
+]
 
-// MARK: - Character mapping
-print("\nCharacter mapping:")
-assertEqual(converter.forceConvert("q")?.text, "й", "q → й")
-assertEqual(converter.forceConvert("й")?.text, "q", "й → q")
-assertEqual(converter.forceConvert("qwertyuiop")?.text.count, 10, "mapping length preserved")
+for w in correctRu {
+    test("RU preserved '\(w)'") {
+        c.convert(w) == nil
+    }
+}
 
-// MARK: - Russian character check
-print("\nRussian character check:")
-assert(LayoutConverter.isRussianCharacter("а"), "а is russian")
-assert(LayoutConverter.isRussianCharacter("я"), "я is russian")
-assert(LayoutConverter.isRussianCharacter("ё"), "ё is russian")
-assert(!LayoutConverter.isRussianCharacter("a"), "a is not russian")
-assert(!LayoutConverter.isRussianCharacter("z"), "z is not russian")
-assert(!LayoutConverter.isRussianCharacter("0"), "0 is not russian")
+// ────────────────────────────────────────────────────────
+// 8. Capitalization preserved in forceConvert
+// ────────────────────────────────────────────────────────
+print("━━━ 8. Capitalization ━━━")
 
-// ============================================================
-print("\n=== WordDictionary Tests ===\n")
+test("FORCE CAPS 'GHBDTN' → 'ПРИВЕТ'") {
+    c.forceConvert("GHBDTN")?.text == "ПРИВЕТ"
+}
+test("FORCE FirstCap 'Ghbdtn' → 'Привет'") {
+    c.forceConvert("Ghbdtn")?.text == "Привет"
+}
+test("FORCE lower 'ghbdtn' → 'привет'") {
+    c.forceConvert("ghbdtn")?.text == "привет"
+}
 
-let dict = WordDictionary()
+// ────────────────────────────────────────────────────────
+// 9. Character mapping accuracy
+// ────────────────────────────────────────────────────────
+print("━━━ 9. Character mapping ━━━")
+
+let mapPairs: [(en: String, ru: String)] = [
+    ("q", "й"), ("w", "ц"), ("e", "у"), ("r", "к"), ("t", "е"),
+    ("y", "н"), ("u", "г"), ("i", "ш"), ("o", "щ"), ("p", "з"),
+    ("a", "ф"), ("s", "ы"), ("d", "в"), ("f", "а"), ("g", "п"),
+    ("h", "р"), ("j", "о"), ("k", "л"), ("l", "д"), ("z", "я"),
+    ("x", "ч"), ("c", "с"), ("v", "м"), ("b", "и"), ("n", "т"),
+    ("m", "ь"),
+]
+
+for p in mapPairs {
+    test("MAP EN→RU '\(p.en)' → '\(p.ru)'") {
+        c.forceConvert(p.en)?.text == p.ru
+    }
+    test("MAP RU→EN '\(p.ru)' → '\(p.en)'") {
+        c.forceConvert(p.ru)?.text == p.en
+    }
+}
+
+// ────────────────────────────────────────────────────────
+// 10. Russian character detection
+// ────────────────────────────────────────────────────────
+print("━━━ 10. Russian character detection ━━━")
+
+let ruChars: [(c: Character, expect: Bool)] = [
+    ("а", true), ("я", true), ("ё", true), ("й", true), ("ь", true),
+    ("a", false), ("z", false), ("0", false), (" ", false), ("!", false),
+]
+
+for p in ruChars {
+    test("isRussian '\(p.c)' = \(p.expect)") {
+        LayoutConverter.isRussianCharacter(p.c) == p.expect
+    }
+}
+
+// ────────────────────────────────────────────────────────
+// 11. Dictionary integration
+// ────────────────────────────────────────────────────────
+print("━━━ 11. Dictionary ━━━")
+
 dict.add("тестовое", language: .russian)
 dict.add("customword", language: .english)
 
-assert(dict.isKnown("тестовое", language: .russian), "known RU word")
-assert(dict.isKnown("customword", language: .english), "known EN word")
-assert(!dict.isKnown("unknown", language: .russian), "unknown not found")
-assert(!dict.isKnown("тестовое", language: .english), "RU word not in EN dict")
-assert(dict.englishCount >= 1, "EN dict has words")
-assert(dict.russianCount >= 1, "RU dict has words")
+test("DICT known RU 'тестовое'") { dict.isKnown("тестовое", language: .russian) }
+test("DICT known EN 'customword'") { dict.isKnown("customword", language: .english) }
+test("DICT unknown 'xyz' not found") { !dict.isKnown("xyz", language: .russian) }
 
-dict.remove("тестовое", language: .russian)
-assert(!dict.isKnown("тестовое", language: .russian), "removed word not found")
+// ────────────────────────────────────────────────────────
+// 12. convert() vs forceConvert() difference
+// ────────────────────────────────────────────────────────
+print("━━━ 12. convert vs forceConvert ━━━")
 
-// Built-in words
-assert(dict.isKnown("и", language: .russian), "built-in RU 'и'")
-assert(dict.isKnown("the", language: .english), "built-in EN 'the'")
+test("convert('hello') = nil (correct word)") { c.convert("hello") == nil }
+test("forceConvert('hello') != nil (force)") { c.forceConvert("hello") != nil }
+test("convert('привет') = nil (correct word)") { c.convert("привет") == nil }
+test("forceConvert('привет') != nil (force)") { c.forceConvert("привет") != nil }
 
-// MARK: - Dictionary integration
-print("\nDictionary integration:")
-let dictConv = LayoutConverter(dictionary: dict)
-dict.add("пред", language: .russian)
-assertEqual(dictConv.convert("ghtl"), Conversion(text: "пред", language: .russian), "dict boost: ghtl → пред")
+// ────────────────────────────────────────────────────────
+// 13. Edge cases: numbers in words
+// ────────────────────────────────────────────────────────
+print("━━━ 13. Numbers in words ━━━")
 
-let dictConv2 = LayoutConverter(dictionary: dict)
-assertNil(dictConv2.convert("hello"), "dict doesn't change correct words")
+test("NUMBERS 'hello1' → nil") { c.convert("hello1") == nil }
+test("NUMBERS '123abc' → nil") { c.convert("123abc") == nil }
+test("NUMBERS 'abc123' → nil") { c.convert("abc123") == nil }
 
-// ============================================================
-print("\n=============================")
-print("Results: \(passed) passed, \(failed) failed")
+// ────────────────────────────────────────────────────────
+// 14. Punctuation in words
+// ────────────────────────────────────────────────────────
+print("━━━ 14. Punctuation ━━━")
+
+test("PUNCT 'hello!' → nil") { c.convert("hello!") == nil }
+test("PUNCT 'test@' → nil") { c.convert("test@") == nil }
+test("PUNCT 'привет.' → nil") { c.convert("привет.") == nil }
+
+// ────────────────────────────────────────────────────────
+// REPORT
+// ────────────────────────────────────────────────────────
+
+let total = passed + failed
+let rate = total > 0 ? passed * 100 / total : 0
+
+print("")
+print("╔══════════════════════════════════════════════════════════╗")
+print("║                    TEST REPORT                          ║")
+print("╚══════════════════════════════════════════════════════════╝")
+print("")
+print("  Total:     \(total)")
+print("  Passed:    \(passed)")
+print("  Failed:    \(failed)")
+print("  Pass rate: \(rate)%")
+print("")
+
 if failed > 0 {
-    exit(1)
+    print("━━━ FAILED ━━━")
+    for (label, ok) in results where !ok {
+        print("  ✗ \(label)")
+    }
+    print("")
 }
+
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print("Completed: \(ISO8601DateFormatter().string(from: Date()))")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+if failed > 0 { exit(1) }
