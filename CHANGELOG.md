@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.2.3] — 2026-06-16
+
+### Changed
+- Замена текста переведена на **AX position-based подход**: вместо поиска слова
+  в AX value (который возвращает garbled текст на macOS 26), берутся последние
+  N символов из AX value и заменяются по длине. Не зависит от содержимого.
+- Удалены CGEvent `postBackspaces`/`postText` как основной метод замены —
+  `CGEvent.post(tap:)` не доставляет синтетические события на macOS 26.
+- Удалён clipboard-based fallback (`Cmd+A` → `Cmd+C` → `Cmd+V`) —
+  CGEvent клавиатурные комбинации также не доставляются на macOS 26.
+
+### Fixed
+- **Double-Option детект**: левый (keyCode=58) и правый (keyCode=61) Option
+  теперь считаются одной группой — `ManualSwitchModifier.keyCodes` возвращает
+  `Set<Int>` с обими вариантами. Раньше код требовал `keyCode == rawValue`,
+  что ломало детект при нажатии правого Option при настроенном левом.
+- **Double-Option детект**: изменена логика с `keyCode == modifier.rawValue`
+  на отслеживание состояния flag bit (`modifierWasDown`) — определение
+  нажатия/отпускания теперь работает для любого модификатора независимо от keyCode.
+- **AX target not found**: `NSRange(value.startIndex...range.lowerBound)` создавал
+  диапазон от начала строки — исправлено на `NSRange(range, in: value)`.
+- **inputSources.select()**: переключение раскладки теперь вызывается ПОСЛЕ
+  замены текста, а не до — раннее переключение искажало AX value.
+- `applyCorrection` принимает `language` параметр — `inputSources.select()`
+  вызывается даже при ошибке AX.
+
+### Technical
+- `ManualSwitchModifier` получил свойство `keyCodes: Set<Int>` — все keyCode,
+  относящиеся к группе модификатора (левый + правый).
+- `replaceTailViaAX(tailLength:replacement:)` — универсальный метод замены
+  последних N символов в AX value.
+
+### Docs
+- Добавлен раздел «Правила разработки» в README — обязанность обновлять
+  документацию и версию после каждого изменения.
+- Правило зафиксировано в проектном MEMORY.md для всех агентов.
+
 ## [0.2.2] — 2026-06-16
 
 ### Fixed

@@ -11,12 +11,11 @@ final class KeyboardMonitor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var currentWord = ""
-    // Последнее набранное слово (для ручного переключения без выделения).
     private var lastTypedWord = ""
 
-    // Детект двойного нажатия модификатора.
     private var lastModifierTapTime: CFTimeInterval = 0
     private var lastModifierKeyCode: Int64 = -1
+    private var modifierWasDown = false
     private static let doubleTapInterval: CFTimeInterval = 0.4
 
     var isEnabled: Bool {
@@ -47,6 +46,7 @@ final class KeyboardMonitor {
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        fputs("[RSW] Event tap enabled: \(CGEvent.tapIsEnabled(tap: tap))\n", stderr)
         return true
     }
 
@@ -77,16 +77,13 @@ final class KeyboardMonitor {
         let settings = AppSettings.shared
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-        // ── Режим «двойное нажатие модификатора» (events типа .flagsChanged) ──
         if type == .flagsChanged {
             if settings.manualSwitchTrigger == .doubleModifier {
                 handleModifierDoubleTap(keyCode: keyCode, flags: event.flags, settings: settings)
             }
-            // Модификаторы всегда пропускаем дальше без изменений.
             return Unmanaged.passUnretained(event)
         }
 
-        // ── Режим «обычная клавиша/комбинация» (events типа .keyDown) ──
         if settings.manualSwitchTrigger == .key,
            settings.manualSwitchKeyCode >= 0,
            keyCode == settings.manualSwitchKeyCode {
@@ -98,12 +95,11 @@ final class KeyboardMonitor {
             if flags.contains(.maskShift) { currentMods.insert(.shift) }
 
             let modMask = NSEvent.ModifierFlags(rawValue: UInt(settings.manualSwitchModifiers))
-            // Требуем непустой набор модификаторов, чтобы не перехватывать обычный ввод.
             if !modMask.isEmpty && currentMods.contains(modMask) {
                 DispatchQueue.main.async { [weak self] in
                     self?.manualSwitchSelectedText()
                 }
-                return nil  // поглощаем событие хоткея
+                return nil
             }
         }
 
@@ -144,10 +140,9 @@ final class KeyboardMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-            fputs("[RSW] \(word) → \(correction.text) (\(correction.language))\n", stderr)
+        fputs("[RSW] AUTO: '\(word)' → '\(correction.text)' (\(correction.language))\n", stderr)
         DispatchQueue.main.async { [weak self] in
-            self?.applyCorrection(word: word, replacement: correction.text, delimiter: text)
-            self?.inputSources.select(correction.language)
+            self?.applyCorrection(word: word, replacement: correction.text, delimiter: text, language: correction.language)
             self?.onCorrection?(word, correction.text, correction.language)
         }
         return Unmanaged.passUnretained(event)
@@ -162,77 +157,99 @@ final class KeyboardMonitor {
         return String(utf16CodeUnits: buffer, count: length)
     }
 
-    private func applyCorrection(word: String, replacement: String, delimiter: String) {
-        let totalBackspaces = word.count + delimiter.count
+    // MARK: - Auto-correction via AX (position-based)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self else { return }
-            self.postBackspaces(totalBackspaces)
+    private func applyCorrection(word: String, replacement: String, delimiter: String, language: KeyboardLanguage) {
+        fputs("[RSW] APPLY: '\(word)' → '\(replacement)'\n", stderr)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                self.postText(replacement + delimiter)
-            }
+        if replaceTailViaAX(tailLength: word.count + delimiter.count, replacement: replacement + delimiter) {
+            fputs("[RSW] APPLY: AX OK\n", stderr)
+            inputSources.select(language)
+            return
         }
+
+        fputs("[RSW] APPLY: AX failed\n", stderr)
+        inputSources.select(language)
     }
 
-    private func postBackspaces(_ count: Int) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        for _ in 0..<count {
-            if let down = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: true),
-               let up = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: false) {
-                down.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-                up.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-                down.post(tap: .cgSessionEventTap)
-                up.post(tap: .cgSessionEventTap)
-            }
-        }
-    }
-
-    private func postText(_ text: String) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        for char in text {
-            let utf16 = Array(String(char).utf16)
-            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { continue }
-            down.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-            up.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-            down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-            up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-            down.post(tap: .cgSessionEventTap)
-            up.post(tap: .cgSessionEventTap)
-        }
-    }
-
-    /// Обрабатывает событие .flagsChanged для детекта двойного нажатия модификатора.
-    private func handleModifierDoubleTap(keyCode: Int64, flags: CGEventFlags, settings: AppSettings) {
-        guard let modifier = ManualSwitchModifier(rawValue: settings.manualSwitchModifierKey) else { return }
-
-        // Интересует только нажатие нужной клавиши-модификатора, не отпускание
-        // и не другие модификаторы. На нажатии соответствующий бит флага установлен.
-        let isPressOfTargetKey = keyCode == Int64(modifier.rawValue)
-            && (flags.rawValue & modifier.maskBit) != 0
-        guard isPressOfTargetKey else { return }
-
-        let now = CACurrentMediaTime()
-        if lastModifierKeyCode == keyCode,
-           now - lastModifierTapTime <= Self.doubleTapInterval {
-            // Двойное нажатие — сброс, чтобы тройное не сработало повторно.
-            lastModifierTapTime = 0
-            lastModifierKeyCode = -1
-            DispatchQueue.main.async { [weak self] in
-                self?.manualSwitchSelectedText()
-            }
-        } else {
-            lastModifierTapTime = now
-            lastModifierKeyCode = keyCode
-        }
-    }
-
-    private func manualSwitchSelectedText() {
+    private func replaceTailViaAX(tailLength: Int, replacement: String) -> Bool {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedValue: AnyObject?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
               let focused = focusedValue else {
+            fputs("[RSW] AX: no focused element\n", stderr)
+            return false
+        }
+
+        var currentValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, &currentValue) == .success,
+              let value = currentValue as? String else {
+            fputs("[RSW] AX: cannot read value\n", stderr)
+            return false
+        }
+
+        fputs("[RSW] AX value (\(value.count) chars): '\(value)'\n", stderr)
+
+        guard value.count >= tailLength else {
+            fputs("[RSW] AX: value too short (\(value.count) < \(tailLength))\n", stderr)
+            return false
+        }
+
+        let endIndex = value.index(value.endIndex, offsetBy: -tailLength)
+        let prefix = String(value[..<endIndex])
+        let newValue = prefix + replacement
+
+        fputs("[RSW] AX: replacing tail \(tailLength) chars → '\(replacement)'\n", stderr)
+
+        let mutable = NSMutableString(string: newValue)
+        let setResult = AXUIElementSetAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, mutable)
+        fputs("[RSW] AX set: \(setResult.rawValue), new value: '\(newValue)'\n", stderr)
+        return setResult == .success
+    }
+
+    // MARK: - Double-Option manual switch
+
+    private func handleModifierDoubleTap(keyCode: Int64, flags: CGEventFlags, settings: AppSettings) {
+        guard let modifier = ManualSwitchModifier(rawValue: settings.manualSwitchModifierKey) else {
+            return
+        }
+
+        let isDown = (flags.rawValue & modifier.maskBit) != 0
+
+        if isDown && !modifierWasDown {
+            let now = CACurrentMediaTime()
+            let elapsed = now - lastModifierTapTime
+            let sameKey = modifier.keyCodes.contains(Int(keyCode)) && modifier.keyCodes.contains(Int(lastModifierKeyCode))
+
+            fputs("[RSW] MOD: key=\(keyCode) elapsed=\(String(format: "%.3f", elapsed)) sameKey=\(sameKey)\n", stderr)
+
+            if sameKey,
+               elapsed <= Self.doubleTapInterval {
+                lastModifierTapTime = 0
+                lastModifierKeyCode = -1
+                fputs("[RSW] MOD: DOUBLE TAP → manualSwitch\n", stderr)
+                DispatchQueue.main.async { [weak self] in
+                    self?.manualSwitchSelectedText()
+                }
+            } else {
+                lastModifierTapTime = now
+                lastModifierKeyCode = keyCode
+            }
+        }
+
+        modifierWasDown = isDown
+    }
+
+    // MARK: - Manual switch
+
+    private func manualSwitchSelectedText() {
+        fputs("[RSW] MANUAL: trying\n", stderr)
+
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+              let focused = focusedValue else {
+            fputs("[RSW] MANUAL: no focused element\n", stderr)
             manualSwitchLastWord()
             return
         }
@@ -246,9 +263,10 @@ final class KeyboardMonitor {
         if valueResult == .success, let value = currentValue as? String,
            rangeResult == .success, let rangeVal = selectedRange as? NSRange,
            rangeVal.location != NSNotFound, rangeVal.length > 0 {
-            // Есть выделение — конвертируем его через AX.
             let selectedText = (value as NSString).substring(with: rangeVal)
+            fputs("[RSW] MANUAL: selected='\(selectedText)'\n", stderr)
             if let conversion = converter.forceConvert(selectedText) {
+                fputs("[RSW] MANUAL: '\(selectedText)' → '\(conversion.text)'\n", stderr)
                 let mutableValue = NSMutableString(string: value)
                 mutableValue.replaceCharacters(in: rangeVal, with: conversion.text)
                 AXUIElementSetAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, mutableValue)
@@ -258,22 +276,21 @@ final class KeyboardMonitor {
             return
         }
 
-        // Выделения нет — fallback на последнее набранное слово.
+        fputs("[RSW] MANUAL: no selection, trying lastWord\n", stderr)
         manualSwitchLastWord()
     }
 
-    /// Fallback: переключить последнее набранное слово через backspace + ввод.
     private func manualSwitchLastWord() {
         let word = lastTypedWord
+        fputs("[RSW] MANUAL lastWord: '\(word)'\n", stderr)
         guard !word.isEmpty, let conversion = converter.forceConvert(word) else { return }
         lastTypedWord = ""
         currentWord = ""
-        postBackspaces(word.count)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-            guard let self else { return }
-            self.postText(conversion.text)
-            self.inputSources.select(conversion.language)
-            self.onCorrection?(word, conversion.text, conversion.language)
+
+        fputs("[RSW] MANUAL: '\(word)' → '\(conversion.text)'\n", stderr)
+        if replaceTailViaAX(tailLength: word.count, replacement: conversion.text) {
+            inputSources.select(conversion.language)
+            onCorrection?(word, conversion.text, conversion.language)
         }
     }
 }

@@ -48,6 +48,17 @@ enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
         case .control: return CGEventFlags.maskControl.rawValue
         }
     }
+
+    /// Все keyCode, относящиеся к этой группе модификаторов (левый + правый).
+    var keyCodes: Set<Int> {
+        switch self {
+        case .option:      return [58, 61]
+        case .rightOption: return [58, 61]
+        case .shift:       return [56, 60]
+        case .command:     return [55, 54, 63]
+        case .control:     return [59, 62]
+        }
+    }
 }
 
 final class AppSettings: ObservableObject {
