@@ -53,25 +53,42 @@ struct HotkeyTab: View {
     var body: some View {
         Form {
             Section("Ручное переключение выделенного текста") {
-                HStack {
-                    Text("Клавиша:")
-                    Spacer()
-                    Button(action: { recordingKey = true }) {
-                        Text(keyName(settings.manualSwitchKeyCode, modifiers: settings.manualSwitchModifiers))
-                            .frame(minWidth: 120)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.bordered)
-                    if recordingKey {
-                        Text("Нажмите клавишу...")
-                            .foregroundColor(.secondary)
+                Picker("Способ вызова", selection: $settings.manualSwitchTrigger) {
+                    ForEach(ManualSwitchTrigger.allCases) { trigger in
+                        Text(trigger.title).tag(trigger)
                     }
                 }
+                .pickerStyle(.radioGroup)
 
-                Text("Нажмите эту комбинацию для переключения выделенного текста")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                if settings.manualSwitchTrigger == .doubleModifier {
+                    Picker("Модификатор", selection: $settings.manualSwitchModifierKey) {
+                        ForEach(ManualSwitchModifier.allCases) { mod in
+                            Text(mod.title).tag(mod.rawValue)
+                        }
+                    }
+                    Text("Дважды быстро нажмите выбранный модификатор, чтобы переключить выделенный текст (или последнее слово).")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    HStack {
+                        Text("Клавиша:")
+                        Spacer()
+                        Button(action: { recordingKey = true }) {
+                            Text(keyName(settings.manualSwitchKeyCode, modifiers: settings.manualSwitchModifiers))
+                                .frame(minWidth: 120)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                        if recordingKey {
+                            Text("Нажмите клавишу...")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Text("Нажмите комбинацию с модификатором (например ⌃⇧S) для переключения выделенного текста.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
             .padding()
         }

@@ -11,6 +11,13 @@ final class KeyboardMonitor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var currentWord = ""
+    // Последнее набранное слово (для ручного переключения без выделения).
+    private var lastTypedWord = ""
+
+    // Детект двойного нажатия модификатора.
+    private var lastModifierTapTime: CFTimeInterval = 0
+    private var lastModifierKeyCode: Int64 = -1
+    private static let doubleTapInterval: CFTimeInterval = 0.4
 
     var isEnabled: Bool {
         get { AppSettings.shared.autoSwitchEnabled }
@@ -20,7 +27,10 @@ final class KeyboardMonitor {
     func start() -> Bool {
         guard eventTap == nil else { return true }
 
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue)
+        )
         let context = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -67,7 +77,19 @@ final class KeyboardMonitor {
         let settings = AppSettings.shared
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-        if settings.manualSwitchKeyCode >= 0 && keyCode == settings.manualSwitchKeyCode {
+        // ── Режим «двойное нажатие модификатора» (events типа .flagsChanged) ──
+        if type == .flagsChanged {
+            if settings.manualSwitchTrigger == .doubleModifier {
+                handleModifierDoubleTap(keyCode: keyCode, flags: event.flags, settings: settings)
+            }
+            // Модификаторы всегда пропускаем дальше без изменений.
+            return Unmanaged.passUnretained(event)
+        }
+
+        // ── Режим «обычная клавиша/комбинация» (events типа .keyDown) ──
+        if settings.manualSwitchTrigger == .key,
+           settings.manualSwitchKeyCode >= 0,
+           keyCode == settings.manualSwitchKeyCode {
             let flags = event.flags
             var currentMods: NSEvent.ModifierFlags = []
             if flags.contains(.maskCommand) { currentMods.insert(.command) }
@@ -76,11 +98,12 @@ final class KeyboardMonitor {
             if flags.contains(.maskShift) { currentMods.insert(.shift) }
 
             let modMask = NSEvent.ModifierFlags(rawValue: UInt(settings.manualSwitchModifiers))
-            if modMask.isEmpty || currentMods.contains(modMask) {
+            // Требуем непустой набор модификаторов, чтобы не перехватывать обычный ввод.
+            if !modMask.isEmpty && currentMods.contains(modMask) {
                 DispatchQueue.main.async { [weak self] in
                     self?.manualSwitchSelectedText()
                 }
-                return Unmanaged.passUnretained(event)
+                return nil  // поглощаем событие хоткея
             }
         }
 
@@ -106,6 +129,7 @@ final class KeyboardMonitor {
 
         if text.allSatisfy({ $0.isLetter || "`[];',.".contains($0) }) {
             currentWord += text
+            lastTypedWord = currentWord
             return Unmanaged.passUnretained(event)
         }
 
@@ -179,27 +203,77 @@ final class KeyboardMonitor {
         }
     }
 
+    /// Обрабатывает событие .flagsChanged для детекта двойного нажатия модификатора.
+    private func handleModifierDoubleTap(keyCode: Int64, flags: CGEventFlags, settings: AppSettings) {
+        guard let modifier = ManualSwitchModifier(rawValue: settings.manualSwitchModifierKey) else { return }
+
+        // Интересует только нажатие нужной клавиши-модификатора, не отпускание
+        // и не другие модификаторы. На нажатии соответствующий бит флага установлен.
+        let isPressOfTargetKey = keyCode == Int64(modifier.rawValue)
+            && (flags.rawValue & modifier.maskBit) != 0
+        guard isPressOfTargetKey else { return }
+
+        let now = CACurrentMediaTime()
+        if lastModifierKeyCode == keyCode,
+           now - lastModifierTapTime <= Self.doubleTapInterval {
+            // Двойное нажатие — сброс, чтобы тройное не сработало повторно.
+            lastModifierTapTime = 0
+            lastModifierKeyCode = -1
+            DispatchQueue.main.async { [weak self] in
+                self?.manualSwitchSelectedText()
+            }
+        } else {
+            lastModifierTapTime = now
+            lastModifierKeyCode = keyCode
+        }
+    }
+
     private func manualSwitchSelectedText() {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedValue: AnyObject?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
-              let focused = focusedValue else { return }
+              let focused = focusedValue else {
+            manualSwitchLastWord()
+            return
+        }
 
         var selectedRange: AnyObject?
         let rangeResult = AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedRange)
 
         var currentValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, &currentValue) == .success,
-              let value = currentValue as? String else { return }
+        let valueResult = AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, &currentValue)
 
-        if rangeResult == .success, let rangeVal = selectedRange as? NSRange, rangeVal.location != NSNotFound, rangeVal.length > 0 {
+        if valueResult == .success, let value = currentValue as? String,
+           rangeResult == .success, let rangeVal = selectedRange as? NSRange,
+           rangeVal.location != NSNotFound, rangeVal.length > 0 {
+            // Есть выделение — конвертируем его через AX.
             let selectedText = (value as NSString).substring(with: rangeVal)
             if let conversion = converter.forceConvert(selectedText) {
                 let mutableValue = NSMutableString(string: value)
                 mutableValue.replaceCharacters(in: rangeVal, with: conversion.text)
                 AXUIElementSetAttributeValue(focused as! AXUIElement, kAXValueAttribute as CFString, mutableValue)
                 inputSources.select(conversion.language)
+                onCorrection?(selectedText, conversion.text, conversion.language)
             }
+            return
+        }
+
+        // Выделения нет — fallback на последнее набранное слово.
+        manualSwitchLastWord()
+    }
+
+    /// Fallback: переключить последнее набранное слово через backspace + ввод.
+    private func manualSwitchLastWord() {
+        let word = lastTypedWord
+        guard !word.isEmpty, let conversion = converter.forceConvert(word) else { return }
+        lastTypedWord = ""
+        currentWord = ""
+        postBackspaces(word.count)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self else { return }
+            self.postText(conversion.text)
+            self.inputSources.select(conversion.language)
+            self.onCorrection?(word, conversion.text, conversion.language)
         }
     }
 }
