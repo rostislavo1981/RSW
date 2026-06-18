@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         monitor.onCorrection = { [weak self] source, replacement, language in
             self?.lastCorrection = (source: source, converted: replacement, language: language)
-            fputs("[rswitcher] onCorrection: '\(source)' → '\(replacement)'\n", stderr)
+            rswDebugLog("[rswitcher] исправление: исходнаяДлина=\(source.count), новаяДлина=\(replacement.count), язык=\(language)")
             if AppSettings.shared.showTooltip {
                 self?.showCorrectionTooltip(source: source, replacement: replacement)
             }
@@ -25,13 +25,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestAccessibilityPermission()
 
         let trusted = AXIsProcessTrusted()
-        fputs("[rswitcher] Accessibility trusted: \(trusted)\n", stderr)
+        RSWDiagnosticLogger.shared.log("app_launch", [
+            "accessibilityTrusted": trusted,
+            "autoSwitchEnabled": monitor.isEnabled
+        ])
+        fputs("[rswitcher] Доступ Accessibility: \(trusted)\n", stderr)
 
         if !monitor.start() {
             statusItem.button?.title = "⌨︎!"
-            fputs("[rswitcher] FAILED to create event tap\n", stderr)
+            fputs("[rswitcher] Не удалось создать event tap\n", stderr)
         } else {
-            fputs("[rswitcher] Event tap created OK\n", stderr)
+            fputs("[rswitcher] Event tap создан\n", stderr)
         }
     }
 

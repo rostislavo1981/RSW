@@ -93,6 +93,7 @@ struct HotkeyTab: View {
             .padding()
         }
         .onReceive(NotificationCenter.default.publisher(for: .keyRecorded)) { notification in
+            guard recordingKey else { return }
             if let info = notification.userInfo as? [String: Any],
                let code = info["keyCode"] as? Int,
                let mods = info["modifiers"] as? Int {
@@ -114,14 +115,21 @@ struct KeyRecorderOverlay: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            (nsView as? KeyRecorderView)?.makeKey()
+        }
+    }
 }
 
 class KeyRecorderView: NSView {
     private var monitor: Any?
 
+    override var acceptsFirstResponder: Bool { true }
+
     override func becomeFirstResponder() -> Bool {
         super.becomeFirstResponder()
+        guard monitor == nil else { return true }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let code = Int(event.keyCode)
             let mods = Int(event.modifierFlags.rawValue & UInt(NSEvent.ModifierFlags.deviceIndependentFlagsMask.rawValue))
@@ -132,6 +140,7 @@ class KeyRecorderView: NSView {
             )
             if let m = self.monitor {
                 NSEvent.removeMonitor(m)
+                self.monitor = nil
             }
             return nil
         }
@@ -215,7 +224,11 @@ struct KeyPickerSheet: View {
                 .padding(.top)
         }
         .frame(width: 300, height: 150)
+        .overlay(
+            recording ? KeyRecorderOverlay() : nil
+        )
         .onReceive(NotificationCenter.default.publisher(for: .keyRecorded)) { notification in
+            guard recording else { return }
             if let info = notification.userInfo as? [String: Any],
                let code = info["keyCode"] as? Int,
                !selectedKeys.contains(code) {
@@ -282,7 +295,17 @@ func keyName(_ code: Int, modifiers: Int) -> String {
     if modFlags.contains(.command) { name += "⌘" }
     if modFlags.contains(.shift) { name += "⇧" }
 
-    let key = String(format: "%c", UInt16(code))
+    let commonKeys: [Int: String] = [
+        0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G",
+        6: "Z", 7: "X", 8: "C", 9: "V", 11: "B",
+        12: "Q", 13: "W", 14: "E", 15: "R", 16: "Y", 17: "T",
+        18: "1", 19: "2", 20: "3", 21: "4", 22: "6", 23: "5",
+        24: "=", 25: "9", 26: "7", 27: "-", 28: "8", 29: "0",
+        30: "]", 31: "O", 32: "U", 33: "[", 34: "I", 35: "P",
+        37: "L", 38: "J", 39: "'", 40: "K", 41: ";", 42: "\\",
+        43: ",", 44: "/", 45: "N", 46: "M", 47: ".",
+        50: "`"
+    ]
     let specialKeys: [Int: String] = [
         36: "Return", 49: "Space", 51: "Delete", 53: "Esc",
         48: "Tab", 123: "←", 124: "→", 125: "↓", 126: "↑",
@@ -295,6 +318,6 @@ func keyName(_ code: Int, modifiers: Int) -> String {
         122: "F1", 127: "F4"
     ]
 
-    name += specialKeys[code] ?? key
+    name += specialKeys[code] ?? commonKeys[code] ?? "#\(code)"
     return name
 }

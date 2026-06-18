@@ -165,7 +165,7 @@ final class AppSettings: ObservableObject {
                 if service.status == .enabled { try service.unregister() }
             }
         } catch {
-            fputs("[rsw] launchAtLogin error: \(error.localizedDescription)\n", stderr)
+            fputs("[rsw] Ошибка автозапуска: \(error.localizedDescription)\n", stderr)
         }
     }
 

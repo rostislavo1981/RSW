@@ -1,23 +1,19 @@
 import Foundation
 
 public final class WordDictionary {
-    public static let shared = WordDictionary()
+    public static let shared = WordDictionary(storageURL: defaultStorageURL())
 
     private var englishWords: Set<String>
     private var russianWords: Set<String>
-    private let fileName = "words.json"
+    private let storageURL: URL?
+    private let lock = NSLock()
 
-    public var englishCount: Int { englishWords.count }
-    public var russianCount: Int { russianWords.count }
+    public var englishCount: Int { lock.withLock { englishWords.count } }
+    public var russianCount: Int { lock.withLock { russianWords.count } }
 
-    private var fileURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("RSwitcher")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(fileName)
-    }
+    public init(storageURL: URL? = nil) {
+        self.storageURL = storageURL
 
-    public init() {
         let builtInEnglish: Set<String> = [
             "the", "is", "it", "in", "on", "at", "to", "of", "and", "an",
             "he", "we", "my", "do", "no", "so", "if", "me", "up", "us",
@@ -32,49 +28,59 @@ public final class WordDictionary {
             "тоже", "тут", "ему", "ей", "вас", "им", "нам", "ним"
         ]
 
-        let loaded = Self.loadFromDisk()
+        let loaded = storageURL.map(Self.loadFromDisk) ?? (english: [], russian: [])
         englishWords = builtInEnglish.union(loaded.english)
         russianWords = builtInRussian.union(loaded.russian)
     }
 
     public func isKnown(_ word: String, language: KeyboardLanguage) -> Bool {
         let lower = word.lowercased()
-        switch language {
-        case .english: return englishWords.contains(lower)
-        case .russian: return russianWords.contains(lower)
+        return lock.withLock {
+            switch language {
+            case .english: return englishWords.contains(lower)
+            case .russian: return russianWords.contains(lower)
+            }
         }
     }
 
     public func add(_ word: String, language: KeyboardLanguage) {
         let lower = word.lowercased()
-        switch language {
-        case .english: englishWords.insert(lower)
-        case .russian: russianWords.insert(lower)
+        lock.withLock {
+            switch language {
+            case .english: englishWords.insert(lower)
+            case .russian: russianWords.insert(lower)
+            }
+            saveToDisk()
         }
-        saveToDisk()
     }
 
     public func remove(_ word: String, language: KeyboardLanguage) {
         let lower = word.lowercased()
-        switch language {
-        case .english: englishWords.remove(lower)
-        case .russian: russianWords.remove(lower)
+        lock.withLock {
+            switch language {
+            case .english: englishWords.remove(lower)
+            case .russian: russianWords.remove(lower)
+            }
+            saveToDisk()
         }
-        saveToDisk()
     }
 
     private func saveToDisk() {
+        guard let storageURL else { return }
+
         let data: [String: [String]] = [
-            "english": Array(englishWords),
-            "russian": Array(russianWords)
+            "english": Array(englishWords).sorted(),
+            "russian": Array(russianWords).sorted()
         ]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: data, options: .prettyPrinted) else { return }
-        try? jsonData.write(to: fileURL, options: .atomic)
+        try? FileManager.default.createDirectory(
+            at: storageURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? jsonData.write(to: storageURL, options: .atomic)
     }
 
-    private static func loadFromDisk() -> (english: Set<String>, russian: Set<String>) {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let url = appSupport.appendingPathComponent("RSwitcher").appendingPathComponent("words.json")
+    private static func loadFromDisk(_ url: URL) -> (english: Set<String>, russian: Set<String>) {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String]] else {
             return (english: [], russian: [])
@@ -83,5 +89,17 @@ public final class WordDictionary {
             english: Set(json["english"] ?? []),
             russian: Set(json["russian"] ?? [])
         )
+    }
+
+    private static func defaultStorageURL() -> URL? {
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return nil
+        }
+        return appSupport
+            .appendingPathComponent("RSwitcher")
+            .appendingPathComponent("words.json")
     }
 }

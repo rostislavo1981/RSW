@@ -11,19 +11,19 @@ func test(_ label: String, _ block: () -> Bool) {
     if ok { passed += 1 } else { failed += 1 }
 }
 
-let c = LayoutConverter()
-let dict = WordDictionary.shared
+let dict = WordDictionary()
+let c = LayoutConverter(dictionary: dict)
 let dictConv = LayoutConverter(dictionary: dict)
 
 print("╔══════════════════════════════════════════════════════════╗")
-print("║            RSW — comprehensive test suite                ║")
+print("║              RSW — полный набор тестов                   ║")
 print("╚══════════════════════════════════════════════════════════╝")
 print("")
 
 // ────────────────────────────────────────────────────────
-// 1. Known wrong-layout words → must convert correctly
+// 1. Известные слова в неверной раскладке
 // ────────────────────────────────────────────────────────
-print("━━━ 1. Known conversion pairs ━━━")
+print("━━━ 1. Известные пары конвертации ━━━")
 
 let knownPairs: [(typed: String, expected: String)] = [
     ("ghbdtn", "привет"),
@@ -37,9 +37,9 @@ for p in knownPairs {
 }
 
 // ────────────────────────────────────────────────────────
-// 2. Force conversion works for any word
+// 2. Принудительная конвертация работает для любого слова
 // ────────────────────────────────────────────────────────
-print("━━━ 2. Force conversion ━━━")
+print("━━━ 2. Принудительная конвертация ━━━")
 
 let forcePairs: [(typed: String, expected: String, lang: KeyboardLanguage)] = [
     ("hello", "руддщ", .russian),
@@ -47,16 +47,16 @@ let forcePairs: [(typed: String, expected: String, lang: KeyboardLanguage)] = [
 ]
 
 for p in forcePairs {
-    test("FORCE '\(p.typed)' → '\(p.expected)' (\(p.lang))") {
+    test("ПРИНУДИТЕЛЬНО '\(p.typed)' → '\(p.expected)' (\(p.lang))") {
         let r = c.forceConvert(p.typed)
         return r?.text == p.expected && r?.language == p.lang
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 3. Short words must NOT convert (auto)
+// 3. Короткие слова не должны исправляться автоматически
 // ────────────────────────────────────────────────────────
-print("━━━ 3. Short words rejected ━━━")
+print("━━━ 3. Короткие слова отклоняются ━━━")
 
 let shortWords = [
     "ab", "no", "ok", "hi", "we", "do", "am", "is", "it", "in",
@@ -65,15 +65,15 @@ let shortWords = [
 ]
 
 for w in shortWords {
-    test("SHORT '\(w)' → nil") {
+    test("КОРОТКОЕ '\(w)' → nil") {
         c.convert(w) == nil
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 4. Mixed language → must NOT convert
+// 4. Смешанные языки не должны исправляться
 // ────────────────────────────────────────────────────────
-print("━━━ 4. Mixed language rejected ━━━")
+print("━━━ 4. Смешанный ввод отклоняется ━━━")
 
 let mixedWords = [
     "helloпривет", "abcйцук", "testтест", "мирworld",
@@ -81,27 +81,27 @@ let mixedWords = [
 ]
 
 for w in mixedWords {
-    test("MIXED '\(w)' → nil") {
+    test("СМЕШАННОЕ '\(w)' → nil") {
         c.convert(w) == nil
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 5. Empty / whitespace
+// 5. Пустые строки и пробелы
 // ────────────────────────────────────────────────────────
-print("━━━ 5. Empty/whitespace rejected ━━━")
+print("━━━ 5. Пустой ввод отклоняется ━━━")
 
 let emptyWords = ["", " ", "\n", "\t", "  "]
 for w in emptyWords {
-    test("EMPTY '\(w.replacingOccurrences(of: "\n", with: "\\n"))' → nil") {
+    test("ПУСТОЕ '\(w.replacingOccurrences(of: "\n", with: "\\n"))' → nil") {
         c.convert(w) == nil
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 6. Known correct English words → preserved
+// 6. Корректные английские слова сохраняются
 // ────────────────────────────────────────────────────────
-print("━━━ 6. Correct English words preserved ━━━")
+print("━━━ 6. Корректный английский ввод сохраняется ━━━")
 
 let correctEn = [
     "hello", "world", "the", "is", "it", "in", "on", "at", "to", "of",
@@ -115,15 +115,15 @@ let correctEn = [
 ]
 
 for w in correctEn {
-    test("EN preserved '\(w)'") {
+    test("EN сохраняется '\(w)'") {
         c.convert(w) == nil
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 7. Known correct Russian words → preserved
+// 7. Корректные русские слова сохраняются
 // ────────────────────────────────────────────────────────
-print("━━━ 7. Correct Russian words preserved ━━━")
+print("━━━ 7. Корректный русский ввод сохраняется ━━━")
 
 let correctRu = [
     "привет", "мир", "и", "в", "не", "на", "я", "что", "он", "с",
@@ -138,30 +138,30 @@ let correctRu = [
 ]
 
 for w in correctRu {
-    test("RU preserved '\(w)'") {
+    test("RU сохраняется '\(w)'") {
         c.convert(w) == nil
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 8. Capitalization preserved in forceConvert
+// 8. Регистр сохраняется при принудительной конвертации
 // ────────────────────────────────────────────────────────
-print("━━━ 8. Capitalization ━━━")
+print("━━━ 8. Сохранение регистра ━━━")
 
-test("FORCE CAPS 'GHBDTN' → 'ПРИВЕТ'") {
+test("ПРИНУДИТЕЛЬНО верхний регистр 'GHBDTN' → 'ПРИВЕТ'") {
     c.forceConvert("GHBDTN")?.text == "ПРИВЕТ"
 }
-test("FORCE FirstCap 'Ghbdtn' → 'Привет'") {
+test("ПРИНУДИТЕЛЬНО первая заглавная 'Ghbdtn' → 'Привет'") {
     c.forceConvert("Ghbdtn")?.text == "Привет"
 }
-test("FORCE lower 'ghbdtn' → 'привет'") {
+test("ПРИНУДИТЕЛЬНО нижний регистр 'ghbdtn' → 'привет'") {
     c.forceConvert("ghbdtn")?.text == "привет"
 }
 
 // ────────────────────────────────────────────────────────
-// 9. Character mapping accuracy
+// 9. Точность таблицы символов
 // ────────────────────────────────────────────────────────
-print("━━━ 9. Character mapping ━━━")
+print("━━━ 9. Таблица символов ━━━")
 
 let mapPairs: [(en: String, ru: String)] = [
     ("q", "й"), ("w", "ц"), ("e", "у"), ("r", "к"), ("t", "е"),
@@ -173,18 +173,18 @@ let mapPairs: [(en: String, ru: String)] = [
 ]
 
 for p in mapPairs {
-    test("MAP EN→RU '\(p.en)' → '\(p.ru)'") {
+    test("ТАБЛИЦА EN→RU '\(p.en)' → '\(p.ru)'") {
         c.forceConvert(p.en)?.text == p.ru
     }
-    test("MAP RU→EN '\(p.ru)' → '\(p.en)'") {
+    test("ТАБЛИЦА RU→EN '\(p.ru)' → '\(p.en)'") {
         c.forceConvert(p.ru)?.text == p.en
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 10. Russian character detection
+// 10. Определение русских символов
 // ────────────────────────────────────────────────────────
-print("━━━ 10. Russian character detection ━━━")
+print("━━━ 10. Определение русских символов ━━━")
 
 let ruChars: [(c: Character, expect: Bool)] = [
     ("а", true), ("я", true), ("ё", true), ("й", true), ("ь", true),
@@ -192,53 +192,53 @@ let ruChars: [(c: Character, expect: Bool)] = [
 ]
 
 for p in ruChars {
-    test("isRussian '\(p.c)' = \(p.expect)") {
+    test("русский символ '\(p.c)' = \(p.expect)") {
         LayoutConverter.isRussianCharacter(p.c) == p.expect
     }
 }
 
 // ────────────────────────────────────────────────────────
-// 11. Dictionary integration
+// 11. Интеграция со словарём
 // ────────────────────────────────────────────────────────
-print("━━━ 11. Dictionary ━━━")
+print("━━━ 11. Словарь ━━━")
 
 dict.add("тестовое", language: .russian)
 dict.add("customword", language: .english)
 
-test("DICT known RU 'тестовое'") { dict.isKnown("тестовое", language: .russian) }
-test("DICT known EN 'customword'") { dict.isKnown("customword", language: .english) }
-test("DICT unknown 'xyz' not found") { !dict.isKnown("xyz", language: .russian) }
+test("СЛОВАРЬ знает RU 'тестовое'") { dict.isKnown("тестовое", language: .russian) }
+test("СЛОВАРЬ знает EN 'customword'") { dict.isKnown("customword", language: .english) }
+test("СЛОВАРЬ не знает 'xyz'") { !dict.isKnown("xyz", language: .russian) }
 
 // ────────────────────────────────────────────────────────
-// 12. convert() vs forceConvert() difference
+// 12. Разница между convert() и forceConvert()
 // ────────────────────────────────────────────────────────
-print("━━━ 12. convert vs forceConvert ━━━")
+print("━━━ 12. convert и forceConvert ━━━")
 
-test("convert('hello') = nil (correct word)") { c.convert("hello") == nil }
-test("forceConvert('hello') != nil (force)") { c.forceConvert("hello") != nil }
-test("convert('привет') = nil (correct word)") { c.convert("привет") == nil }
-test("forceConvert('привет') != nil (force)") { c.forceConvert("привет") != nil }
-
-// ────────────────────────────────────────────────────────
-// 13. Edge cases: numbers in words
-// ────────────────────────────────────────────────────────
-print("━━━ 13. Numbers in words ━━━")
-
-test("NUMBERS 'hello1' → nil") { c.convert("hello1") == nil }
-test("NUMBERS '123abc' → nil") { c.convert("123abc") == nil }
-test("NUMBERS 'abc123' → nil") { c.convert("abc123") == nil }
+test("convert('hello') = nil (корректное слово)") { c.convert("hello") == nil }
+test("forceConvert('hello') != nil (принудительно)") { c.forceConvert("hello") != nil }
+test("convert('привет') = nil (корректное слово)") { c.convert("привет") == nil }
+test("forceConvert('привет') != nil (принудительно)") { c.forceConvert("привет") != nil }
 
 // ────────────────────────────────────────────────────────
-// 14. Punctuation in words
+// 13. Граничные случаи: цифры в словах
 // ────────────────────────────────────────────────────────
-print("━━━ 14. Punctuation ━━━")
+print("━━━ 13. Цифры в словах ━━━")
 
-test("PUNCT 'hello!' → nil") { c.convert("hello!") == nil }
-test("PUNCT 'test@' → nil") { c.convert("test@") == nil }
-test("PUNCT 'привет.' → nil") { c.convert("привет.") == nil }
+test("ЦИФРЫ 'hello1' → nil") { c.convert("hello1") == nil }
+test("ЦИФРЫ '123abc' → nil") { c.convert("123abc") == nil }
+test("ЦИФРЫ 'abc123' → nil") { c.convert("abc123") == nil }
 
 // ────────────────────────────────────────────────────────
-// REPORT
+// 14. Пунктуация в словах
+// ────────────────────────────────────────────────────────
+print("━━━ 14. Пунктуация ━━━")
+
+test("ПУНКТУАЦИЯ 'hello!' → nil") { c.convert("hello!") == nil }
+test("ПУНКТУАЦИЯ 'test@' → nil") { c.convert("test@") == nil }
+test("ПУНКТУАЦИЯ 'привет.' → nil") { c.convert("привет.") == nil }
+
+// ────────────────────────────────────────────────────────
+// Отчёт
 // ────────────────────────────────────────────────────────
 
 let total = passed + failed
@@ -246,17 +246,17 @@ let rate = total > 0 ? passed * 100 / total : 0
 
 print("")
 print("╔══════════════════════════════════════════════════════════╗")
-print("║                    TEST REPORT                          ║")
+print("║                     ОТЧЁТ ТЕСТОВ                        ║")
 print("╚══════════════════════════════════════════════════════════╝")
 print("")
-print("  Total:     \(total)")
-print("  Passed:    \(passed)")
-print("  Failed:    \(failed)")
-print("  Pass rate: \(rate)%")
+print("  Всего:       \(total)")
+print("  Успешно:     \(passed)")
+print("  Провалено:   \(failed)")
+print("  Успешность:  \(rate)%")
 print("")
 
 if failed > 0 {
-    print("━━━ FAILED ━━━")
+    print("━━━ ПРОВАЛЕННЫЕ ТЕСТЫ ━━━")
     for (label, ok) in results where !ok {
         print("  ✗ \(label)")
     }
@@ -264,7 +264,7 @@ if failed > 0 {
 }
 
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("Completed: \(ISO8601DateFormatter().string(from: Date()))")
+print("Завершено: \(ISO8601DateFormatter().string(from: Date()))")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 if failed > 0 { exit(1) }
