@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         monitor.onCorrection = { [weak self] source, replacement, language in
             self?.lastCorrection = (source: source, converted: replacement, language: language)
-            rswDebugLog("[rswitcher] исправление: исходнаяДлина=\(source.count), новаяДлина=\(replacement.count), язык=\(language)")
+            rswDebugLog("[rswitcher] исправление: исходнаяДлина=\\(source.count), новаяДлина=\\(replacement.count), язык=\\(language)")
             if AppSettings.shared.showTooltip {
                 self?.showCorrectionTooltip(source: source, replacement: replacement)
             }
@@ -53,11 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         enabledItem.target = self
         enabledItem.state = monitor.isEnabled ? .on : .off
-        statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎−"
+        statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎-"
         menu.addItem(enabledItem)
 
         menu.addItem(NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
+
+        // New menu item: Открыть текущий лог
+        let openLogItem = NSMenuItem(title: "Открыть текущий лог", action: #selector(openLogFolder(_:)))
+        menu.addItem(openLogItem)
 
         let addLastItem = NSMenuItem(
             title: "Добавить последнее слово в словарь",
@@ -80,10 +84,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
+    // MARK: – Actions
     @objc private func toggleEnabled() {
         monitor.isEnabled.toggle()
         enabledItem.state = monitor.isEnabled ? .on : .off
-        statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎−"
+        statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎-"
     }
 
     @objc private func openSettings() {
@@ -138,15 +143,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dict.add(lower, language: .russian)
             showAlert(message: "«\(word)» добавлено в русский словарь.")
         } else {
-            showAlert(message: "Не удалось определить язык слова «\(word)».")
+            showAlert(message: "Не удалось определить язык слова «\(word).")
         }
+    }
+
+    @objc private func openLogFolder(_ sender: Any?) {
+        // Resolve the logs directory: ~/Library/Logs/RSW (or the custom path from settings)
+        let logsURL = FileManager.default.urls(for: .logsDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("RSW") ?? URL(fileURLWithPath: "~/Library/Logs/RSW")
+        let url = URL(fileURLWithPath: url.path)
+        NSWorkspace.shared.open(url)
     }
 
     private func showCorrectionTooltip(source: String, replacement: String) {
         guard let button = statusItem.button else { return }
         tooltipResetTimer?.invalidate()
         button.title = "⌨︎ \(replacement)"
-        let restored = monitor.isEnabled ? "⌨︎" : "⌨︎−"
+        let restored = monitor.isEnabled ? "⌨︎" : "⌨︎-"
         tooltipResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { _ in
             button.title = restored
         }
@@ -163,5 +177,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 }
-
-import SwiftUI
