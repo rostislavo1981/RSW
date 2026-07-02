@@ -29,12 +29,19 @@ public struct LayoutConverter {
         "ст", "но", "то", "на", "ен", "ов", "ни", "ра", "во", "ко", "ро", "по",
         "ос", "ер", "пр", "го", "ал", "ли", "от", "ре", "де", "та", "ть", "ка",
         "ет", "ло", "ор", "ан", "ва", "те", "ел", "ит", "ар", "ый", "ла", "ве",
-        "ин", "ом", "ри", "не", "мо", "ся", "ми", "до", "че", "ск", "ил", "со"
+        "ин", "ом", "ри", "не", "мо", "ся", "ми", "до", "че", "ск", "ил", "со",
+        "бу", "уд", "ду", "ут", "ур", "ру", "кт", "тр", "ту", "фе", "еш", "ль"
     ]
 
     private static let englishRare: Set<Character> = ["й", "ц", "ш", "щ", "ы", "э", "ю", "я"]
     private static let russianImpossible: Set<String> = [
         "q", "w", "x", "j", "zh", "sh", "ch", "th", "wh", "ck", "ph"
+    ]
+    private static let suspiciousRussianCharacters: Set<Character> = [
+        "ё", "й", "ц", "щ", "ъ", "ы", "ь", "э", "ю"
+    ]
+    private static let suspiciousRussianPairs: Set<String> = [
+        "еу", "уы", "уе", "дд", "щщ", "ьф", "фс", "цщ", "щк", "ыц", "шс", "ср"
     ]
 
     private let englishToRussian: [Character: Character]
@@ -76,7 +83,11 @@ public struct LayoutConverter {
 
         let targetLanguage: KeyboardLanguage = sourceLanguage == .english ? .russian : .english
 
-        if dictionary.isKnown(converted, language: targetLanguage) && !dictionary.isKnown(lower, language: sourceLanguage) {
+        if dictionary.isKnown(lower, language: sourceLanguage) {
+            return nil
+        }
+
+        if dictionary.isKnown(converted, language: targetLanguage) {
             return Conversion(
                 text: preserveCase(from: word, in: converted),
                 language: targetLanguage
@@ -86,7 +97,17 @@ public struct LayoutConverter {
         let sourceScore = score(lower, as: sourceLanguage)
         let targetScore = score(converted, as: targetLanguage)
 
-        guard targetScore >= 2, targetScore - sourceScore >= 4 else { return nil }
+        guard sourceLooksLikeWrongLayout(
+            source: lower,
+            converted: converted,
+            sourceLanguage: sourceLanguage,
+            sourceScore: sourceScore,
+            targetScore: targetScore
+        ) else {
+            return nil
+        }
+
+        guard targetScore >= 2, targetScore - sourceScore >= 3 else { return nil }
 
         return Conversion(
             text: preserveCase(from: word, in: converted),
@@ -130,6 +151,35 @@ public struct LayoutConverter {
         }
 
         return result
+    }
+
+    private func sourceLooksLikeWrongLayout(
+        source: String,
+        converted: String,
+        sourceLanguage: KeyboardLanguage,
+        sourceScore: Int,
+        targetScore: Int
+    ) -> Bool {
+        switch sourceLanguage {
+        case .english:
+            let hasLayoutPunctuation = source.contains { "`[];',.".contains($0) }
+            let hasEnglishVowel = source.contains { "aeiouy".contains($0) }
+            let hasAwkwardEnglishKey = source.contains { "qwxj".contains($0) }
+            return hasLayoutPunctuation || !hasEnglishVowel || hasAwkwardEnglishKey || sourceScore < 0
+
+        case .russian:
+            guard !converted.contains(where: { "`[];',.".contains($0) }) else {
+                return false
+            }
+
+            let pairs = zip(source, source.dropFirst()).map { String([$0, $1]) }
+            let hasSuspiciousCharacter = source.contains { Self.suspiciousRussianCharacters.contains($0) }
+            let hasSuspiciousPair = pairs.contains { Self.suspiciousRussianPairs.contains($0) }
+            let sourceLooksPlausible = sourceScore >= 3
+            let targetIsMuchBetter = targetScore - sourceScore >= 6
+
+            return (hasSuspiciousCharacter || hasSuspiciousPair || !sourceLooksPlausible) && targetIsMuchBetter
+        }
     }
 
     private func preserveCase(from source: String, in converted: String) -> String {

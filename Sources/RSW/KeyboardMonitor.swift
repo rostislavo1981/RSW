@@ -3,7 +3,6 @@ import SwitcherCore
 
 final class KeyboardMonitor {
     private static let syntheticEventMarker: Int64 = 0x54494E59
-    private static let deleteKeyCode: CGKeyCode = 51
     private static let terminalBundleIdentifiers: Set<String> = [
         "com.apple.Terminal",
         "com.googlecode.iterm2",
@@ -154,9 +153,7 @@ final class KeyboardMonitor {
                     "keyCode": keyCode,
                     "modifiers": settings.manualSwitchModifiers
                 ])
-                DispatchQueue.main.async { [weak self] in
-                    self?.manualSwitchSelectedText()
-                }
+                manualSwitchSelectedText()
                 return nil
             }
         }
@@ -174,9 +171,6 @@ final class KeyboardMonitor {
         if keyCode == 51 {
             if !currentWord.isEmpty {
                 currentWord.removeLast()
-                if focusedAppPrefersBufferedReplacement() {
-                    return nil
-                }
             }
             return Unmanaged.passUnretained(event)
         }
@@ -196,10 +190,6 @@ final class KeyboardMonitor {
             ])
             currentWord = ""
             return Unmanaged.passUnretained(event)
-        }
-
-        if focusedAppPrefersBufferedReplacement() {
-            return handleBufferedTerminalInput(text: text, settings: settings)
         }
 
         if text.allSatisfy({ $0.isLetter || "`[];',.".contains($0) }) {
@@ -240,57 +230,12 @@ final class KeyboardMonitor {
             "language": String(describing: correction.language)
         ])
         rswDebugLog("[RSW] АВТО: исправление принято, исходнаяДлина=\(word.count), новаяДлина=\(correction.text.count), язык=\(correction.language)")
-        if focusedAppPrefersSyntheticReplacement() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-                guard self?.applyTerminalCorrectionAfterDelimiter(
-                    word: word,
-                    replacement: correction.text,
-                    delimiter: text,
-                    language: correction.language
-                ) == true else {
-                    return
-                }
-                self?.onCorrection?(word, correction.text, correction.language)
-            }
-            return Unmanaged.passUnretained(event)
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.applyCorrection(word: word, replacement: correction.text, delimiter: text, language: correction.language)
-            self?.onCorrection?(word, correction.text, correction.language)
-        }
-        return nil
-    }
-
-    private func handleBufferedTerminalInput(text: String, settings: AppSettings) -> Unmanaged<CGEvent>? {
-        if text.allSatisfy({ $0.isLetter || "`[];',.".contains($0) }) {
-            currentWord += text
-            lastTypedWord = currentWord
+        if applyCorrection(word: word, replacement: correction.text, delimiter: text, language: correction.language) {
+            onCorrection?(word, correction.text, correction.language)
             return nil
         }
 
-        let word = currentWord
-        currentWord = ""
-
-        guard !word.isEmpty else {
-            _ = pasteTextToFrontmostApp(text) || postText(text)
-            return nil
-        }
-
-        if isEnabled,
-           word.count >= settings.minWordLength,
-           let correction = converter.convert(word) {
-            let inserted = pasteTextToFrontmostApp(correction.text + text)
-                || postText(correction.text + text)
-            if inserted {
-                inputSources.select(correction.language)
-                onCorrection?(word, correction.text, correction.language)
-            }
-            return nil
-        }
-
-        _ = pasteTextToFrontmostApp(word + text) || postText(word + text)
-        return nil
+        return Unmanaged.passUnretained(event)
     }
 
     private func eventText(_ event: CGEvent) -> String? {
@@ -304,22 +249,20 @@ final class KeyboardMonitor {
 
     // MARK: - Auto-correction via AX (position-based)
 
-    private func applyCorrection(word: String, replacement: String, delimiter: String, language: KeyboardLanguage) {
+    private func applyCorrection(word: String, replacement: String, delimiter: String, language: KeyboardLanguage) -> Bool {
         rswDebugLog("[RSW] ПРИМЕНЕНИЕ: исходнаяДлина=\(word.count), новаяДлина=\(replacement.count)")
         RSWDiagnosticLogger.shared.logFocusedAX("apply_correction")
 
-        if focusedAppPrefersSyntheticReplacement(),
-           replaceWordViaTerminalPaste(word: word, replacement: replacement + delimiter) {
-            rswDebugLog("[RSW] ПРИМЕНЕНИЕ: pasteboard-замена для терминала отправлена")
-            inputSources.select(language)
-            return
-        }
-
-        if focusedAppPrefersSyntheticReplacement() {
-            rswDebugLog("[RSW] ПРИМЕНЕНИЕ: терминальная замена не подтверждена, возвращаю разделитель")
-            postText(delimiter)
-            inputSources.select(language)
-            return
+        if focusedAppIsTerminal() {
+            rswDebugLog("[RSW] ПРИМЕНЕНИЕ: терминал пропущен")
+            RSWDiagnosticLogger.shared.log("correction_failed", [
+                "reason": "terminal_excluded",
+                "wordLength": word.count,
+                "replacementLength": replacement.count,
+                "delimiterLength": delimiter.count,
+                "language": String(describing: language)
+            ])
+            return false
         }
 
         if replaceWordBeforeCursorViaAX(
@@ -337,46 +280,18 @@ final class KeyboardMonitor {
             ])
             rswDebugLog("[RSW] ПРИМЕНЕНИЕ: AX успешно")
             inputSources.select(language)
-            return
+            return true
         }
 
-        rswDebugLog("[RSW] ПРИМЕНЕНИЕ: AX не сработал")
-        if replaceWordViaSyntheticEvents(wordLength: word.count, replacement: replacement + delimiter) {
-            RSWDiagnosticLogger.shared.log("correction_applied", [
-                "path": "synthetic",
-                "wordLength": word.count,
-                "replacementLength": replacement.count,
-                "delimiterLength": delimiter.count,
-                "language": String(describing: language)
-            ])
-            rswDebugLog("[RSW] ПРИМЕНЕНИЕ: синтетическая замена отправлена")
-            inputSources.select(language)
-            return
-        }
-
+        rswDebugLog("[RSW] ПРИМЕНЕНИЕ: AX не сработал, автоисправление отменено")
         RSWDiagnosticLogger.shared.log("correction_failed", [
+            "reason": "ax_unavailable",
             "wordLength": word.count,
             "replacementLength": replacement.count,
             "delimiterLength": delimiter.count,
             "language": String(describing: language)
         ])
-        postText(delimiter)
-        inputSources.select(language)
-    }
-
-    private func applyTerminalCorrectionAfterDelimiter(
-        word: String,
-        replacement: String,
-        delimiter: String,
-        language: KeyboardLanguage
-    ) -> Bool {
-        rswDebugLog("[RSW] TERMINAL: попытка замены после доставленного разделителя")
-        guard replaceTerminalWordBeforeDelimiter(word: word, replacement: replacement, delimiter: delimiter) else {
-            rswDebugLog("[RSW] TERMINAL: замена после разделителя не подтверждена")
-            return false
-        }
-        inputSources.select(language)
-        return true
+        return false
     }
 
     private func replaceWordBeforeCursorViaAX(
@@ -489,9 +404,7 @@ final class KeyboardMonitor {
                 lastModifierTapTime = 0
                 lastModifierKeyCode = -1
                 rswDebugLog("[RSW] МОДИФИКАТОР: двойное нажатие → ручное переключение")
-                DispatchQueue.main.async { [weak self] in
-                    self?.manualSwitchSelectedText()
-                }
+                manualSwitchSelectedText()
             } else {
                 lastModifierTapTime = now
                 lastModifierKeyCode = keyCode
@@ -501,14 +414,14 @@ final class KeyboardMonitor {
         modifierWasDown = isDown
     }
 
-    // MARK: - Manual switch
+    // MARK: - Manual switch (AX-only)
 
     private func manualSwitchSelectedText() {
         rswDebugLog("[RSW] РУЧНОЕ: попытка")
         RSWDiagnosticLogger.shared.logFocusedAX("manual_switch")
 
         guard let focused = focusedAXElement() else {
-            RSWDiagnosticLogger.shared.log("manual_switch_fallback", [
+            RSWDiagnosticLogger.shared.log("manual_switch_failed", [
                 "reason": "no_focused_ax"
             ])
             manualSwitchLastWord()
@@ -547,39 +460,23 @@ final class KeyboardMonitor {
                     inputSources.select(conversion.language)
                     onCorrection?(selectedText, conversion.text, conversion.language)
                     return
-                } else {
-                    rswDebugLog("[RSW] РУЧНОЕ: запись выделения не удалась, код=\(setResult.rawValue)")
                 }
 
-                if replaceCurrentSelectionViaPaste(replacement: conversion.text) {
-                    RSWDiagnosticLogger.shared.log("manual_switch_applied", [
-                        "path": "pasteboard",
-                        "selectedLength": selectedText.count,
-                        "replacementLength": conversion.text.count
-                    ])
-                    inputSources.select(conversion.language)
-                    onCorrection?(selectedText, conversion.text, conversion.language)
-                    return
-                }
+                rswDebugLog("[RSW] РУЧНОЕ: запись выделения не удалась, код=\(setResult.rawValue)")
+                RSWDiagnosticLogger.shared.log("manual_switch_failed", [
+                    "reason": "ax_set_failed",
+                    "code": setResult.rawValue
+                ])
+            } else {
+                RSWDiagnosticLogger.shared.log("manual_switch_failed", [
+                    "reason": "no_conversion",
+                    "selectedLength": selectedText.count
+                ])
             }
             return
         }
 
-        if let selectedText = selectedText(in: focused),
-           let conversion = converter.forceConvert(selectedText),
-           replaceCurrentSelectionViaPaste(replacement: conversion.text) {
-            RSWDiagnosticLogger.shared.log("manual_switch_applied", [
-                "path": "selected_text_pasteboard",
-                "selectedLength": selectedText.count,
-                "replacementLength": conversion.text.count,
-                "language": String(describing: conversion.language)
-            ])
-            inputSources.select(conversion.language)
-            onCorrection?(selectedText, conversion.text, conversion.language)
-            return
-        }
-
-        RSWDiagnosticLogger.shared.log("manual_switch_fallback", [
+        RSWDiagnosticLogger.shared.log("manual_switch_failed", [
             "reason": "no_selection"
         ])
         rswDebugLog("[RSW] РУЧНОЕ: нет выделения, пробую последнее слово")
@@ -590,7 +487,8 @@ final class KeyboardMonitor {
         let word = lastTypedWord
         rswDebugLog("[RSW] РУЧНОЕ последнее слово: длина=\(word.count)")
         guard !word.isEmpty, let conversion = converter.forceConvert(word) else {
-            RSWDiagnosticLogger.shared.log("manual_switch_last_word_skipped", [
+            RSWDiagnosticLogger.shared.log("manual_switch_failed", [
+                "reason": "empty_or_no_conversion",
                 "wordLength": word.count
             ])
             return
@@ -613,228 +511,13 @@ final class KeyboardMonitor {
             lastTypedWord = conversion.text
             inputSources.select(conversion.language)
             onCorrection?(word, conversion.text, conversion.language)
-        } else if focusedAppPrefersSyntheticReplacement(),
-                  replaceWordViaTerminalPaste(word: word, replacement: conversion.text) {
-            RSWDiagnosticLogger.shared.log("manual_switch_applied", [
-                "path": "last_word_terminal_pasteboard",
-                "wordLength": word.count,
-                "replacementLength": conversion.text.count,
-                "language": String(describing: conversion.language)
-            ])
-            lastTypedWord = conversion.text
-            inputSources.select(conversion.language)
-            onCorrection?(word, conversion.text, conversion.language)
-        } else if focusedAppPrefersSyntheticReplacement() {
-            rswDebugLog("[RSW] РУЧНОЕ: терминальная замена последнего слова не подтверждена")
-        } else if replaceWordViaSyntheticEvents(wordLength: word.count, replacement: conversion.text) {
-            RSWDiagnosticLogger.shared.log("manual_switch_applied", [
-                "path": "last_word_synthetic",
-                "wordLength": word.count,
-                "replacementLength": conversion.text.count,
-                "language": String(describing: conversion.language)
-            ])
-            lastTypedWord = conversion.text
-            inputSources.select(conversion.language)
-            onCorrection?(word, conversion.text, conversion.language)
-        }
-    }
-
-    private func replaceWordViaSyntheticEvents(wordLength: Int, replacement: String) -> Bool {
-        guard let source = CGEventSource(stateID: .hidSystemState) else { return false }
-        source.setLocalEventsFilterDuringSuppressionState(
-            [.permitLocalMouseEvents, .permitSystemDefinedEvents],
-            state: .eventSuppressionStateSuppressionInterval
-        )
-
-        for _ in 0..<wordLength {
-            postKey(keyCode: Self.deleteKeyCode, keyDown: true, source: source)
-            postKey(keyCode: Self.deleteKeyCode, keyDown: false, source: source)
+            return
         }
 
-        postText(replacement, source: source)
-        return true
-    }
-
-    private struct PasteboardSnapshot {
-        let changeCount: Int
-        let items: [[NSPasteboard.PasteboardType: Data]]
-    }
-
-    private func replaceWordViaTerminalPaste(word: String, replacement: String) -> Bool {
-        guard selectWordBeforeCursorViaAX(word: word) else {
-            rswDebugLog("[RSW] TERMINAL: не удалось выделить слово перед курсором")
-            return false
-        }
-
-        let pasteboard = NSPasteboard.general
-        let snapshot = snapshotPasteboard(pasteboard)
-
-        pasteboard.clearContents()
-        pasteboard.setString(replacement, forType: .string)
-        let payloadChangeCount = pasteboard.changeCount
-
-        let pasted = performPasteMenuActionInFrontmostApp()
-        if pasted {
-            restorePasteboard(snapshot, to: pasteboard, expectedChangeCount: payloadChangeCount, delay: 0.5)
-        } else {
-            restorePasteboard(snapshot, to: pasteboard, expectedChangeCount: payloadChangeCount, delay: 0)
-        }
-        return pasted
-    }
-
-    private func replaceTerminalWordBeforeDelimiter(
-        word: String,
-        replacement: String,
-        delimiter: String
-    ) -> Bool {
-        guard selectWordBeforeCursorViaAX(word: word, delimiter: delimiter) else {
-            return false
-        }
-        return replaceCurrentSelectionViaPaste(replacement: replacement)
-    }
-
-    private func selectWordBeforeCursorViaAX(word: String) -> Bool {
-        selectWordBeforeCursorViaAX(word: word, delimiter: "")
-    }
-
-    private func selectWordBeforeCursorViaAX(word: String, delimiter: String) -> Bool {
-        guard let focused = focusedAXElement(),
-              let selectedRange = selectedTextRange(in: focused),
-              selectedRange.location != NSNotFound,
-              selectedRange.length == 0 else {
-            return false
-        }
-
-        let wordLength = (word as NSString).length
-        let delimiterLength = (delimiter as NSString).length
-        guard selectedRange.location >= wordLength + delimiterLength else { return false }
-
-        if delimiterLength > 0,
-           let value = focusedValueString(in: focused) {
-            let nsValue = value as NSString
-            let delimiterRange = NSRange(location: selectedRange.location - delimiterLength, length: delimiterLength)
-            guard NSMaxRange(delimiterRange) <= nsValue.length,
-                  nsValue.substring(with: delimiterRange) == delimiter else {
-                return false
-            }
-        }
-
-        let range = NSRange(
-            location: selectedRange.location - delimiterLength - wordLength,
-            length: wordLength
-        )
-        guard setSelectedTextRange(range, in: focused) else { return false }
-
-        guard let selectedText = selectedText(in: focused),
-              selectedText == word else {
-            rswDebugLog("[RSW] TERMINAL: AX подтвердил range, но selectedText не совпал со словом")
-            setSelectedTextRange(NSRange(location: selectedRange.location, length: 0), in: focused)
-            return false
-        }
-
-        return true
-    }
-
-    private func replaceCurrentSelectionViaPaste(replacement: String) -> Bool {
-        pasteTextToFrontmostApp(replacement)
-    }
-
-    private func pasteTextToFrontmostApp(_ text: String) -> Bool {
-        let pasteboard = NSPasteboard.general
-        let snapshot = snapshotPasteboard(pasteboard)
-
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        let payloadChangeCount = pasteboard.changeCount
-
-        let pasted = performPasteMenuActionInFrontmostApp()
-        if pasted {
-            restorePasteboard(snapshot, to: pasteboard, expectedChangeCount: payloadChangeCount, delay: 0.5)
-        } else {
-            restorePasteboard(snapshot, to: pasteboard, expectedChangeCount: payloadChangeCount, delay: 0)
-        }
-        return pasted
-    }
-
-    private func snapshotPasteboard(_ pasteboard: NSPasteboard) -> PasteboardSnapshot {
-        let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
-            var dataByType: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    dataByType[type] = data
-                }
-            }
-            return dataByType
-        } ?? []
-        return PasteboardSnapshot(changeCount: pasteboard.changeCount, items: items)
-    }
-
-    private func restorePasteboard(
-        _ snapshot: PasteboardSnapshot,
-        to pasteboard: NSPasteboard,
-        expectedChangeCount: Int,
-        delay: TimeInterval
-    ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard pasteboard.changeCount == expectedChangeCount else { return }
-            pasteboard.clearContents()
-            let restoredItems = snapshot.items.map { itemData in
-                let item = NSPasteboardItem()
-                for (type, data) in itemData {
-                    item.setData(data, forType: type)
-                }
-                return item
-            }
-            pasteboard.writeObjects(restoredItems)
-        }
-    }
-
-    private func performPasteMenuActionInFrontmostApp() -> Bool {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return false }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-
-        var menuBarValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(appElement, kAXMenuBarAttribute as CFString, &menuBarValue) == .success,
-              let menuBar = menuBarValue,
-              CFGetTypeID(menuBar) == AXUIElementGetTypeID(),
-              let pasteItem = findPasteMenuItem(in: menuBar as! AXUIElement) else {
-            return false
-        }
-
-        return AXUIElementPerformAction(pasteItem, kAXPressAction as CFString) == .success
-    }
-
-    private func findPasteMenuItem(in element: AXUIElement) -> AXUIElement? {
-        if menuItemIsPaste(element) {
-            return element
-        }
-
-        var childrenValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-              let children = childrenValue as? [AXUIElement] else {
-            return nil
-        }
-
-        for child in children {
-            if let result = findPasteMenuItem(in: child) {
-                return result
-            }
-        }
-        return nil
-    }
-
-    private func menuItemIsPaste(_ element: AXUIElement) -> Bool {
-        var cmdCharValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXMenuItemCmdCharAttribute as CFString, &cmdCharValue) == .success,
-              let cmdChar = cmdCharValue as? String,
-              cmdChar.lowercased() == "v" else {
-            return false
-        }
-        return true
-    }
-
-    private func focusedAppPrefersSyntheticReplacement() -> Bool {
-        focusedAppIsTerminal()
+        RSWDiagnosticLogger.shared.log("manual_switch_failed", [
+            "reason": "ax_unavailable",
+            "wordLength": word.count
+        ])
     }
 
     private func focusedAppIsTerminal() -> Bool {
@@ -842,51 +525,6 @@ final class KeyboardMonitor {
             return false
         }
         return Self.terminalBundleIdentifiers.contains(bundleIdentifier)
-    }
-
-    private func focusedAppPrefersBufferedReplacement() -> Bool {
-        focusedAppPrefersSyntheticReplacement()
-    }
-
-    private func postKey(
-        keyCode: CGKeyCode,
-        keyDown: Bool,
-        source: CGEventSource,
-        flags: CGEventFlags = []
-    ) {
-        guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: keyDown) else {
-            return
-        }
-        event.flags = flags
-        event.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-        event.post(tap: .cghidEventTap)
-    }
-
-    @discardableResult
-    private func postText(_ text: String, source: CGEventSource) -> Bool {
-        var posted = false
-        for scalar in text.unicodeScalars {
-            guard scalar.value <= UInt32(UInt16.max) else { continue }
-            var codeUnit = UniChar(scalar.value)
-            guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-                continue
-            }
-            keyDown.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-            keyUp.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
-            keyDown.keyboardSetUnicodeString(stringLength: 1, unicodeString: &codeUnit)
-            keyUp.keyboardSetUnicodeString(stringLength: 1, unicodeString: &codeUnit)
-            keyDown.post(tap: .cghidEventTap)
-            keyUp.post(tap: .cghidEventTap)
-            posted = true
-        }
-        return posted
-    }
-
-    @discardableResult
-    private func postText(_ text: String) -> Bool {
-        guard let source = CGEventSource(stateID: .hidSystemState) else { return false }
-        return postText(text, source: source)
     }
 
     private func focusedAXElement() -> AXUIElement? {

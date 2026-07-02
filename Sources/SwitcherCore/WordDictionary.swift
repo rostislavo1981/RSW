@@ -17,7 +17,8 @@ public final class WordDictionary {
         let builtInEnglish: Set<String> = [
             "the", "is", "it", "in", "on", "at", "to", "of", "and", "an",
             "he", "we", "my", "do", "no", "so", "if", "me", "up", "us",
-            "be", "as", "am", "or", "by", "go", "ok", "hi"
+            "be", "as", "am", "or", "by", "go", "ok", "hi",
+            "hello", "world", "test", "mac", "switch", "keyboard", "buffer"
         ]
         let builtInRussian: Set<String> = [
             "и", "в", "не", "на", "я", "что", "он", "с", "а", "это",
@@ -25,7 +26,8 @@ public final class WordDictionary {
             "у", "же", "вы", "за", "по", "из", "о", "от", "до", "ли",
             "нет", "вот", "ну", "уж", "бы", "ей", "их", "сам", "уже",
             "или", "ни", "если", "там", "где", "тут", "при", "над",
-            "тоже", "тут", "ему", "ей", "вас", "им", "нам", "ним"
+            "тоже", "ему", "ей", "вас", "им", "нам", "ним",
+            "структуру", "будут", "буфер", "машины", "манипулятора"
         ]
 
         let loaded = storageURL.map(Self.loadFromDisk) ?? (english: [], russian: [])
