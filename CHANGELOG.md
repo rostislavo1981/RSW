@@ -2,6 +2,27 @@
 
 ## [Unreleased] — 2026-07-02
 
+### Changed
+- **Phase 3: Converter tuning** — добавлен `ConversionBuilder` с детализированным
+  `ConversionDecision` API (outcome, scores, dictionary hit, rejection reason).
+- Встроенные словари английский и русский вынесены из hardcoded массивов в
+  JSON-ресурсы `Sources/SwitcherCore/Resources/` и загружаются через
+  `Bundle.module`. Это убирает дублирование данных между кодом и тестами.
+- `LayoutConverter` получил публичные `map(_:using:)`, `score(_:as:)` и
+  expose static constants (`englishKeys`, `russianKeys`, `englishCommon`,
+  `russianCommon`, `suspiciousRussianCharacters`, `suspiciousRussianPairs` и
+  другие) для использования в `ConversionBuilder` и юнит-тестах.
+
+### Tests
+- Добавлен corpus-backed тест `18` в `TestRunner`: 4 TP-пары из логов и
+  13 FP-слов проверяются через реальный `LayoutConverter + WordDictionary +
+  ConversionBuilder`. Всего тестов: 319 (было 302), 100% успех.
+
+### Documentation
+- Обновлён `docs/REFACTORING_PLAN.md`: Phase 3 отмечен как завершённый.
+
+## [Unreleased] — 2026-07-02 (Phase 2 safety cleanup)
+
 ### Fixed
 - Полностью удалён synthetic fallback из ручного переключения последнего
   слова: `KeyboardMonitor.manualSwitchLastWord()` теперь работает только через

@@ -1,4 +1,4 @@
-# RSW v0.2.17
+# RSW v0.2.18
 
 Минимальный автоматический переключатель русской/английской раскладки для macOS
 на Apple Silicon. Приложение живёт в строке меню, хранит только текущее слово и
@@ -48,7 +48,7 @@ Ghostty, Kitty и Alacritty приложение не исправляет те�
 командную строку через Accessibility, pasteboard или синтетические события.
 Вместо рискованной замены RSW пропускает все события клавиатуры как есть.
 
-## Безопасная архитектура v0.2.17
+## Безопасная архитектура v0.2.18
 
 Текущая стратегия: лучше не исправить слово, чем исправить не то. Поэтому:
 
@@ -57,6 +57,26 @@ Ghostty, Kitty и Alacritty приложение не исправляет те�
 - меню Paste не вызывается;
 - терминальные приложения работают только в pass-through режиме;
 - если AX не подтверждает позицию курсора, исходный ввод остаётся без изменений.
+
+### ConversionDecision debug API
+
+Внутренний `ConversionBuilder` возвращает детализированное решение:
+- outcome (auto / fallback с причиной);
+- convertedText, source/target language;
+- sourceScore, targetScore;
+- dictionaryHit и rejectionReason.
+
+Это позволяет строить табличные FP/FN-тесты на основе диагностических логов
+и тонко настраивать пороги без изменения production кода.
+
+### Встроенные словари
+
+Built-in словари вынесены в JSON-ресурсы (`Sources/SwitcherCore/Resources/`):
+- `english_dictionary.json`
+- `russian_dictionary.json`
+
+При запуске они загружаются через `Bundle.module` и объединяются с
+пользовательским словарём из `~/Library/Application Support/RSwitcher/words.json`.
 
 Подробный план рефакторинга и улучшений: [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md).
 

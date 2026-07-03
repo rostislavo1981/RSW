@@ -16,16 +16,16 @@ public struct Conversion: Equatable {
 }
 
 public struct LayoutConverter {
-    private static let englishKeys = "`qwertyuiop[]asdfghjkl;'zxcvbnm,."
-    private static let russianKeys = "ёйцукенгшщзхъфывапролджэячсмитьбю"
+    public static let englishKeys = "`qwertyuiop[]asdfghjkl;'zxcvbnm,."
+    public static let russianKeys = "ёйцукенгшщзхъфывапролджэячсмитьбю"
 
-    private static let englishCommon: Set<String> = [
+    public static let englishCommon: Set<String> = [
         "th", "he", "in", "er", "an", "re", "on", "at", "en", "nd", "ti", "es",
         "or", "te", "of", "ed", "is", "it", "al", "ar", "st", "to", "nt", "ng",
         "se", "ha", "as", "ou", "io", "le", "ve", "co", "me", "de", "hi", "ri",
         "ro", "ic", "ne", "ea", "ra", "ce", "li", "ch", "ll", "be", "ma", "si"
     ]
-    private static let russianCommon: Set<String> = [
+    public static let russianCommon: Set<String> = [
         "ст", "но", "то", "на", "ен", "ов", "ни", "ра", "во", "ко", "ро", "по",
         "ос", "ер", "пр", "го", "ал", "ли", "от", "ре", "де", "та", "ть", "ка",
         "ет", "ло", "ор", "ан", "ва", "те", "ел", "ит", "ар", "ый", "ла", "ве",
@@ -33,19 +33,19 @@ public struct LayoutConverter {
         "бу", "уд", "ду", "ут", "ур", "ру", "кт", "тр", "ту", "фе", "еш", "ль"
     ]
 
-    private static let englishRare: Set<Character> = ["й", "ц", "ш", "щ", "ы", "э", "ю", "я"]
-    private static let russianImpossible: Set<String> = [
+    public static let englishRare: Set<Character> = ["й", "ц", "ш", "щ", "ы", "э", "ю", "я"]
+    public static let russianImpossible: Set<String> = [
         "q", "w", "x", "j", "zh", "sh", "ch", "th", "wh", "ck", "ph"
     ]
-    private static let suspiciousRussianCharacters: Set<Character> = [
+    public static let suspiciousRussianCharacters: Set<Character> = [
         "ё", "й", "ц", "щ", "ъ", "ы", "ь", "э", "ю"
     ]
-    private static let suspiciousRussianPairs: Set<String> = [
+    public static let suspiciousRussianPairs: Set<String> = [
         "еу", "уы", "уе", "дд", "щщ", "ьф", "фс", "цщ", "щк", "ыц", "шс", "ср"
     ]
 
-    private let englishToRussian: [Character: Character]
-    private let russianToEnglish: [Character: Character]
+    public let englishToRussian: [Character: Character]
+    public let russianToEnglish: [Character: Character]
     private let dictionary: WordDictionary
 
     public static func isRussianCharacter(_ c: Character) -> Bool {
@@ -132,11 +132,11 @@ public struct LayoutConverter {
         return nil
     }
 
-    private func map(_ value: String, using table: [Character: Character]) -> String {
+    public func map(_ value: String, using table: [Character: Character]) -> String {
         String(value.compactMap { table[$0] })
     }
 
-    private func score(_ value: String, as language: KeyboardLanguage) -> Int {
+    public func score(_ value: String, as language: KeyboardLanguage) -> Int {
         let pairs = zip(value, value.dropFirst()).map { String([$0, $1]) }
         let common = language == .english ? Self.englishCommon : Self.russianCommon
         var result = pairs.reduce(0) { $0 + (common.contains($1) ? 2 : 0) }

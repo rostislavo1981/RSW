@@ -1,5 +1,4 @@
 import Foundation
-import SwitcherCore
 
 /**
 A small, pure struct that holds the currently typed word and provides helpers.

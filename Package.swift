@@ -11,7 +11,13 @@ import Foundation
 let enableXCTest = ProcessInfo.processInfo.environment["RSW_ENABLE_XCTEST"] == "1"
 
 var targets: [Target] = [
-    .target(name: "SwitcherCore"),
+    .target(
+        name: "SwitcherCore",
+        resources: [
+            .copy("Resources/english_dictionary.json"),
+            .copy("Resources/russian_dictionary.json")
+        ]
+    ),
     .executableTarget(
         name: "RSW",
         dependencies: ["SwitcherCore"]

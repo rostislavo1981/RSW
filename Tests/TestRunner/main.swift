@@ -312,6 +312,48 @@ test("DICT-RU: 'машины' не конвертируется") { c.convert("�
 test("DICT-RU: 'манипулятора' не конвертируется") { c.convert("манипулятора") == nil }
 
 // ────────────────────────────────────────────────────────
+// 18. ConversionBuilder: corpus-backed decisions (Phase 3)
+//     Используем реальный LayoutConverter + WordDictionary,
+//     проверяем что известные TP из логов конвертируются,
+//     а известные FP — нет.
+// ────────────────────────────────────────────────────────
+print("━━━ 18. ConversionBuilder: corpus-backed decisions ━━━")
+
+let corpusConverter = LayoutConverter(dictionary: dict)
+let corpusBuilder = ConversionBuilder(
+    converter: corpusConverter,
+    dictionary: dict,
+    minWordLength: 3
+)
+
+let corpusTP: [(typed: String, expectedContains: String)] = [
+    ("ghbdtn", "привет"),
+    ("руддщ", "hello"),
+    ("еуые", "test"),
+    ("ьфс", "mac"),
+]
+
+for p in corpusTP {
+    test("CORPUS-TP: '\(p.typed)' → содержит '\(p.expectedContains)'") {
+        guard let decision = corpusBuilder.buildDecision(from: p.typed, sourceLang: .english) else { return false }
+        return decision.outcome == .auto && decision.convertedText?.contains(p.expectedContains) == true
+    }
+}
+
+let corpusFP: [String] = [
+    "структуру", "будут", "буфер", "машины", "манипулятора",
+    "привет", "вдруг", "вокруг", "вдоль", "направо", "вперёд", "тоже", "ыфсщ",
+]
+
+for typed in corpusFP {
+    test("CORPUS-FP: '\(typed)' → fallback") {
+        guard let decision = corpusBuilder.buildDecision(from: typed, sourceLang: .russian) else { return false }
+        if case .fallback = decision.outcome { return true }
+        return false
+    }
+}
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

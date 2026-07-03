@@ -1,7 +1,6 @@
 import Foundation
 import CoreGraphics
 import ServiceManagement
-import SwitcherCore
 
 // MARK: – Manual switch configuration
 enum ManualSwitchTrigger: String, CaseIterable, Identifiable {
@@ -57,7 +56,7 @@ enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
     }
 }
 
-final class AppSettings: ObservableObject {
+public final class AppSettings: ObservableObject {
     /// Shared singleton used throughout the project.
     public static let shared = AppSettings()
 

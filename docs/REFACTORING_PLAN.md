@@ -57,7 +57,7 @@ Target fix:
 
 ## Implementation Plan
 
-### Phase 1: Safety cleanup
+### Phase 1: Safety cleanup ✅
 
 1. Remove `last_word_synthetic` fallback from manual switching.
 2. Remove `replaceWordViaSyntheticEvents()`, `postKey()`, and free-form `postText()` if no longer needed.
@@ -65,14 +65,14 @@ Target fix:
 4. Update diagnostics so failed manual fallback logs `manual_switch_failed` with an explicit reason.
 5. Add regression tests around manual-switch state where possible using extracted pure helpers.
 
-### Phase 2: Architecture split
+### Phase 2: Architecture split ✅
 
 1. Extract `WordBuffer` with unit tests for letters, delimiters, backspace, modifiers, and app switches.
 2. Extract `AppPolicy` with terminal bundle identifiers and excluded app/key decisions.
 3. Extract `AXTextReplacement` with range calculation helpers that can be tested without live AX.
 4. Keep `KeyboardMonitor` as a small coordinator.
 
-### Phase 3: Converter tuning
+### Phase 3: Converter tuning ✅
 
 1. Add a `ConversionDecision` test-only/debug API.
 2. Build a corpus from sanitized diagnostic logs: accepted corrections, skipped words, and known false positives.
@@ -87,9 +87,10 @@ Target fix:
 
 ## Acceptance Criteria
 
-- No code path uses `NSPasteboard` or menu Paste for replacement.
-- No automatic path posts synthetic backspaces or text.
-- Manual switching never posts backspaces unless the exact target range is verified immediately before posting; preferably it never posts them at all.
-- `swift run TestRunner` passes.
-- `swift build -c release` passes.
-- README accurately describes disabled fallback behavior and known unsupported apps.
+- [x] No code path uses `NSPasteboard` or menu Paste for replacement.
+- [x] No automatic path posts synthetic backspaces or text.
+- [x] Manual switching never posts backspaces unless the exact target range is verified immediately before posting; preferably it never posts them at all.
+- [x] `swift run TestRunner` passes.
+- [x] `swift build -c release` passes.
+- [x] README accurately describes disabled fallback behavior and known unsupported apps.
+- [x] Phase 3: `ConversionBuilder` + corpus-backed tests + resource-based dictionaries.

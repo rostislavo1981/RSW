@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 import ApplicationServices
-import SwitcherCore
 
 /** AXTextReplacement – небольшая оболочка над raw‑AX‑вызовами,
 которая знает, как:

@@ -14,21 +14,8 @@ public final class WordDictionary {
     public init(storageURL: URL? = nil) {
         self.storageURL = storageURL
 
-        let builtInEnglish: Set<String> = [
-            "the", "is", "it", "in", "on", "at", "to", "of", "and", "an",
-            "he", "we", "my", "do", "no", "so", "if", "me", "up", "us",
-            "be", "as", "am", "or", "by", "go", "ok", "hi",
-            "hello", "world", "test", "mac", "switch", "keyboard", "buffer"
-        ]
-        let builtInRussian: Set<String> = [
-            "и", "в", "не", "на", "я", "что", "он", "с", "а", "это",
-            "как", "все", "она", "так", "его", "но", "да", "ты", "к",
-            "у", "же", "вы", "за", "по", "из", "о", "от", "до", "ли",
-            "нет", "вот", "ну", "уж", "бы", "ей", "их", "сам", "уже",
-            "или", "ни", "если", "там", "где", "тут", "при", "над",
-            "тоже", "ему", "ей", "вас", "им", "нам", "ним",
-            "структуру", "будут", "буфер", "машины", "манипулятора"
-        ]
+        let builtInEnglish = Self.loadWords(from: "english_dictionary", bundle: .module)
+        let builtInRussian = Self.loadWords(from: "russian_dictionary", bundle: .module)
 
         let loaded = storageURL.map(Self.loadFromDisk) ?? (english: [], russian: [])
         englishWords = builtInEnglish.union(loaded.english)
@@ -91,6 +78,16 @@ public final class WordDictionary {
             english: Set(json["english"] ?? []),
             russian: Set(json["russian"] ?? [])
         )
+    }
+
+    private static func loadWords(from filename: String, bundle: Bundle) -> Set<String> {
+        guard let url = bundle.url(forResource: filename, withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String]],
+              let words = json["words"] else {
+            return []
+        }
+        return Set(words)
     }
 
     private static func defaultStorageURL() -> URL? {
