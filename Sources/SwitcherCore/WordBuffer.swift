@@ -8,6 +8,8 @@ outside of the KeyboardMonitor.
 public struct WordBuffer {
     /// The characters that have been typed but not yet submitted.
     private var characters: String = ""
+
+    public init() {}
     
     /// The word that finished after the most recent space/ punctuation.
     ///
@@ -22,17 +24,23 @@ public struct WordBuffer {
     ///
     /// The method is deliberately small and self‑contained – it can be
     /// called from anywhere without side effects.
-    mutating func append(_ newChar: Character) {
+    public mutating func append(_ newChar: Character) {
         characters.append(newChar)
     }
-    
+
     /// Resets the stored buffer. Call this when:
     ///   * a word has been submitted,
     ///   * the user typed a back‑space,
     ///   * a terminator (space, punctuation, etc.) arrives,
     ///   * the user switches to a different app.
-    mutating func reset() {
-        characters.removeAll()
+    public mutating func reset() {
+        characters.removeAll(keepingCapacity: true)
+    }
+
+    /// Removes the last character (back-space). No-op if the buffer is empty.
+    public mutating func removeLast() {
+        guard !characters.isEmpty else { return }
+        characters.removeLast()
     }
     
     /// Returns the current buffered word.

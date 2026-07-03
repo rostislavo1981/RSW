@@ -4,7 +4,7 @@ import SwiftUI
 import SwitcherCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let monitor = KeyboardMonitor()
+    private let monitor = KeyboardMonitor(appPolicy: DefaultAppPolicy(settings: AppSettings.shared))
     private var statusItem: NSStatusItem!
     private var enabledItem: NSMenuItem!
     private var lastCorrection: (source: String, converted: String, language: KeyboardLanguage)?
@@ -144,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             dict.add(lower, language: .russian)
             showAlert(message: "«\(word)» добавлено в русский словарь.")
         } else {
-            showAlert(message: "Не удалось определить язык слова «\(word).")
+            showAlert(message: "Не удалось определить язык слова «\(word)».")
         }
     }
 
@@ -222,9 +222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         tooltipResetTimer?.invalidate()
         button.title = "⌨︎ \(replacement)"
-        let restored = monitor.isEnabled ? "⌨︎" : "⌨︎-"
-        tooltipResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { _ in
-            button.title = restored
+        tooltipResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+            // Читаем isEnabled в момент срабатывания, а не в момент
+            // создания closure.  Иначе toggle внутри 1.5s приведёт
+            // к откату title в устаревшее состояние.
+            let enabled = self?.monitor.isEnabled ?? true
+            button.title = enabled ? "⌨︎" : "⌨︎-"
         }
     }
 

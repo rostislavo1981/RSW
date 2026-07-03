@@ -46,7 +46,7 @@ final class RSWDiagnosticLogger {
             "directory": directoryURL.path,
             "maxFileBytes": maxFileBytes,
             "pid": Int(ProcessInfo.processInfo.processIdentifier),
-            "version": "0.2.15"
+            "version": "0.2.19"
         ])
     }
 

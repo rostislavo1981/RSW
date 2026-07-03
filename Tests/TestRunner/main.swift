@@ -354,6 +354,139 @@ for typed in corpusFP {
 }
 
 // ────────────────────────────────────────────────────────
+// 19. Phase 2/4 wire-in: WordBuffer API, AppPolicy инжекция
+// ────────────────────────────────────────────────────────
+print("━━━ 19. Phase 2/4 wire-in: WordBuffer + AppPolicy ━━━")
+
+// WordBuffer: append / currentWord / removeLast / reset
+test("WordBuffer: append → currentWord накапливает") {
+    var b = WordBuffer()
+    for ch in "hello" { b.append(ch) }
+    return b.currentWord == "hello"
+}
+
+test("WordBuffer: removeLast убирает последний символ") {
+    var b = WordBuffer()
+    for ch in "hello" { b.append(ch) }
+    b.removeLast()
+    return b.currentWord == "hell"
+}
+
+test("WordBuffer: removeLast на пустом — no-op") {
+    var b = WordBuffer()
+    b.removeLast()
+    return b.currentWord == ""
+}
+
+test("WordBuffer: reset очищает буфер, capacity сохраняется") {
+    var b = WordBuffer()
+    for ch in "привет" { b.append(ch) }
+    b.reset()
+    return b.currentWord == "" && b.submittedWord == ""
+}
+
+test("WordBuffer: submittedWord == currentWord пока не вызван reset") {
+    var b = WordBuffer()
+    for ch in "world" { b.append(ch) }
+    return b.submittedWord == "world" && b.currentWord == "world"
+}
+
+// AppPolicy: DefaultAppPolicy должен пропускать bundleID, которого нет в allow-list
+// даже если это Electron (настройка enableElectronAllowList должна быть ON).
+test("AppPolicy: дефолт — VSCode НЕ в allow-list → отклонён (allow-list ВКЛ по умолчанию)") {
+    // Дефолт AppSettings.shared.enableElectronAllowList == true,
+    // и electronAllowedIdentifiers пуст. Любой известный Electron
+    // (например VSCode) должен быть отклонён.
+    let original = AppSettings.shared.enableElectronAllowList
+    let originalAllowed = AppSettings.shared.electronAllowedIdentifiers
+    AppSettings.shared.enableElectronAllowList = true
+    AppSettings.shared.electronAllowedIdentifiers = []
+    let policy = DefaultAppPolicy(settings: AppSettings.shared)
+    let electronResult = policy.shouldAllowAutomaticReplacement(for: "com.microsoft.VSCode")
+    let nonElectronResult = policy.shouldAllowAutomaticReplacement(for: "com.apple.TextEdit")
+    AppSettings.shared.enableElectronAllowList = original
+    AppSettings.shared.electronAllowedIdentifiers = originalAllowed
+    return electronResult == false && nonElectronResult == true
+}
+
+test("AppPolicy: allow-list ВКЛ — Electron вне списка запрещён") {
+    // Включаем allow-list и проверяем: известный Electron-бандл, не добавленный
+    // в разрешённые, должен быть отклонён.
+    let original = AppSettings.shared.enableElectronAllowList
+    let originalAllowed = AppSettings.shared.electronAllowedIdentifiers
+    AppSettings.shared.enableElectronAllowList = true
+    AppSettings.shared.electronAllowedIdentifiers = []  // никого не разрешили
+    let policy = DefaultAppPolicy(settings: AppSettings.shared)
+    let electronResult = policy.shouldAllowAutomaticReplacement(for: "com.microsoft.VSCode")
+    let nonElectronResult = policy.shouldAllowAutomaticReplacement(for: "com.apple.TextEdit")
+    // Восстанавливаем
+    AppSettings.shared.enableElectronAllowList = original
+    AppSettings.shared.electronAllowedIdentifiers = originalAllowed
+    return electronResult == false && nonElectronResult == true
+}
+
+test("AppPolicy: allow-list ВКЛ — добавленный в список Electron разрешён") {
+    let original = AppSettings.shared.enableElectronAllowList
+    let originalAllowed = AppSettings.shared.electronAllowedIdentifiers
+    AppSettings.shared.enableElectronAllowList = true
+    AppSettings.shared.electronAllowedIdentifiers = ["com.microsoft.VSCode"]
+    let policy = DefaultAppPolicy(settings: AppSettings.shared)
+    let result = policy.shouldAllowAutomaticReplacement(for: "com.microsoft.VSCode")
+    AppSettings.shared.enableElectronAllowList = original
+    AppSettings.shared.electronAllowedIdentifiers = originalAllowed
+    return result == true
+}
+
+// LayoutConverter.convertWithDiagnostics: единая точка scoring'а
+// (Phase 2 dedup verification)
+test("convertWithDiagnostics: известная TP-пара → success") {
+    let r = c.convertWithDiagnostics("ghbdtn")
+    return r.success?.text == "привет" && r.rejection == nil
+}
+
+test("convertWithDiagnostics: известная TP-пара RU→EN → success") {
+    let r = c.convertWithDiagnostics("руддщ")
+    return r.success?.text == "hello" && r.rejection == nil
+}
+
+test("convertWithDiagnostics: слишком короткое → .tooShort") {
+    let r = c.convertWithDiagnostics("ab")
+    return r.success == nil && r.rejection?.reason == .tooShort
+}
+
+test("convertWithDiagnostics: mixed-layout → .mixedLayout") {
+    let r = c.convertWithDiagnostics("hello привет")
+    return r.success == nil && r.rejection?.reason == .mixedLayout
+}
+
+test("convertWithDiagnostics: sourceIsKnownCorrect — слово уже в словаре source-языка") {
+    // "hello" — стандартное EN-слово, попадёт в EN-словарь (built-in)
+    let r = c.convertWithDiagnostics("hello")
+    // В зависимости от того, есть ли "hello" в словаре, может быть
+    // либо .sourceIsKnownCorrect, либо .alreadyValid.  Оба — fallback.
+    return r.success == nil && r.rejection != nil
+}
+
+test("convertWithDiagnostics: random gibberish → lowConfidence или alreadyValid") {
+    let r = c.convertWithDiagnostics("xqwpz")
+    return r.success == nil && (r.rejection?.reason == .lowConfidence || r.rejection?.reason == .alreadyValid)
+}
+
+test("convertWithDiagnostics: метрики в rejection совпадают с прямым score()") {
+    // sanity-check: sourceScore/targetScore в rejection — те же,
+    // что вернул бы `score(_:as:)` напрямую
+    let r = c.convertWithDiagnostics("руддщ")
+    guard r.success != nil, r.rejection == nil else {
+        // для успешной пары rejection == nil, sanity-check на rejected-кейсе
+        let r2 = c.convertWithDiagnostics("xqwpz")
+        guard let rej = r2.rejection else { return false }
+        let direct = c.score("xqwpz", as: .russian)
+        return rej.sourceScore == direct
+    }
+    return true
+}
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

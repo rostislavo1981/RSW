@@ -5,6 +5,38 @@ public enum KeyboardLanguage: Equatable {
     case russian
 }
 
+public enum LayoutRejectionReason: Equatable {
+    case tooShort
+    case mixedLayout
+    case sourceIsKnownCorrect
+    case targetUnknown
+    case sourceNotPlausible
+    case lowConfidence
+    case alreadyValid
+}
+
+public struct LayoutRejection: Equatable {
+    public let reason: LayoutRejectionReason
+    public let sourceScore: Int
+    public let targetScore: Int
+    public let targetLanguage: KeyboardLanguage?
+    public let mappedText: String?
+
+    public init(
+        reason: LayoutRejectionReason,
+        sourceScore: Int = 0,
+        targetScore: Int = 0,
+        targetLanguage: KeyboardLanguage? = nil,
+        mappedText: String? = nil
+    ) {
+        self.reason = reason
+        self.sourceScore = sourceScore
+        self.targetScore = targetScore
+        self.targetLanguage = targetLanguage
+        self.mappedText = mappedText
+    }
+}
+
 public struct Conversion: Equatable {
     public let text: String
     public let language: KeyboardLanguage
@@ -130,6 +162,92 @@ public struct LayoutConverter {
             )
         }
         return nil
+    }
+
+    /// Расширенная версия `convert(_:)`, которая возвращает подробности
+    /// отказа вместо голого `nil`.  Используется `ConversionBuilder`,
+    /// чтобы избежать повторного вычисления `sourceScore`/`targetScore`
+    /// и `sourceLooksLikeWrongLayout` после того, как `convert` уже всё
+    /// проверил.
+    ///
+    /// Возвращаемые пары:
+    ///   • `(.success(conversion), nil)` — автоконвертация разрешена;
+    ///   • `(nil, rejection)` — отказ с указанием причины и, по возможности,
+    ///     исходных метрик для диагностики.
+    public func convertWithDiagnostics(_ word: String) -> (success: Conversion?, rejection: LayoutRejection?) {
+        let minLength = 3
+        guard word.count >= minLength else {
+            return (nil, LayoutRejection(reason: .tooShort))
+        }
+
+        let lower = word.lowercased()
+        let sourceLanguage: KeyboardLanguage
+        let converted: String
+
+        if lower.allSatisfy({ $0.isASCII && ($0.isLetter || "`[];',.".contains($0)) }) {
+            sourceLanguage = .english
+            converted = map(lower, using: englishToRussian)
+        } else if lower.allSatisfy({ Self.russianKeys.contains($0) }) {
+            sourceLanguage = .russian
+            converted = map(lower, using: russianToEnglish)
+        } else {
+            return (nil, LayoutRejection(reason: .mixedLayout))
+        }
+
+        guard converted.count == lower.count else {
+            return (nil, LayoutRejection(reason: .mixedLayout, mappedText: converted))
+        }
+
+        let targetLanguage: KeyboardLanguage = sourceLanguage == .english ? .russian : .english
+
+        if dictionary.isKnown(lower, language: sourceLanguage) {
+            return (nil, LayoutRejection(
+                reason: .sourceIsKnownCorrect,
+                targetLanguage: targetLanguage,
+                mappedText: converted
+            ))
+        }
+
+        if dictionary.isKnown(converted, language: targetLanguage) {
+            return (
+                Conversion(text: preserveCase(from: word, in: converted), language: targetLanguage),
+                nil
+            )
+        }
+
+        let sourceScore = score(lower, as: sourceLanguage)
+        let targetScore = score(converted, as: targetLanguage)
+
+        guard sourceLooksLikeWrongLayout(
+            source: lower,
+            converted: converted,
+            sourceLanguage: sourceLanguage,
+            sourceScore: sourceScore,
+            targetScore: targetScore
+        ) else {
+            return (nil, LayoutRejection(
+                reason: .alreadyValid,
+                sourceScore: sourceScore,
+                targetScore: targetScore,
+                targetLanguage: targetLanguage,
+                mappedText: converted
+            ))
+        }
+
+        guard targetScore >= 2, targetScore - sourceScore >= 3 else {
+            return (nil, LayoutRejection(
+                reason: .lowConfidence,
+                sourceScore: sourceScore,
+                targetScore: targetScore,
+                targetLanguage: targetLanguage,
+                mappedText: converted
+            ))
+        }
+
+        return (
+            Conversion(text: preserveCase(from: word, in: converted), language: targetLanguage),
+            nil
+        )
     }
 
     public func map(_ value: String, using table: [Character: Character]) -> String {

@@ -1,0 +1,7 @@
+services:
+  rsw-tests:
+    build: .
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - RSW_DIAG=1

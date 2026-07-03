@@ -2,6 +2,11 @@
 
 ## [Unreleased] — 2026-07-03
 
+### Added
+- Docker support для тестирования: `Dockerfile`, `docker-compose.yml`, `.dockerignore`.
+  `TestRunner` теперь работает в Docker (Linux) благодаря `#if os(macOS)` в
+  `AppSettings`, `AppPolicy`, `AXTextReplacement`.
+
 ### Changed
 - **Phase 4: Runtime quality** — добавлен app-level allow/deny policy:
   `DefaultAppPolicy` теперь применяет allow-list только к известным

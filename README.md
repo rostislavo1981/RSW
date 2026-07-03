@@ -127,6 +127,16 @@ swift run TestRunner
 
 Готовый исполняемый файл: `.build/release/rsw`.
 
+### Docker
+
+Тесты можно запустить в Docker (Linux):
+
+```bash
+docker compose up --build
+```
+
+Логи пишутся в `./logs/`.
+
 ## Диагностика
 
 Подробные runtime-логи отключены по умолчанию, чтобы запуск из Терминала не

@@ -1,9 +1,12 @@
+#if os(macOS)
 import AppKit
+#endif
 
 public protocol AppPolicy {
     func shouldAllowAutomaticReplacement(for bundleID: String) -> Bool
 }
 
+#if os(macOS)
 public final class DefaultAppPolicy: AppPolicy {
     private let settings: AppSettings
 
@@ -47,3 +50,4 @@ public final class DefaultAppPolicy: AppPolicy {
         return false
     }
 }
+#endif

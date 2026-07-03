@@ -45,6 +45,11 @@ public struct ConversionDecision: Equatable {
 
 // MARK: - Conversion builder
 
+/// `ConversionBuilder` — тонкая обёртка над `LayoutConverter`,
+/// которая преобразует (успех, отказ) в `ConversionDecision` с
+/// человекочитаемыми причинами.  Реальный scoring и
+/// `sourceLooksLikeWrongLayout` живут в `LayoutConverter` —
+/// дубликат устранён (Phase 2 refactor).
 public final class ConversionBuilder {
     private let converter: LayoutConverter
     private let dictionary: WordDictionary
@@ -57,9 +62,10 @@ public final class ConversionBuilder {
     }
 
     public func buildDecision(from typed: String, sourceLang: KeyboardLanguage) -> ConversionDecision? {
-        let lower = typed.lowercased()
-
-        if lower.count < minWordLength {
+        // 1. Локальная проверка `minWordLength` (в `convertWithDiagnostics`
+        //    зашит минимум 3, но `AppSettings.minWordLength` может быть
+        //    другим — поэтому проверяем здесь).
+        if typed.count < minWordLength {
             return ConversionDecision(
                 outcome: .fallback(reason: .shortWord),
                 sourceLanguage: sourceLang,
@@ -67,82 +73,68 @@ public final class ConversionBuilder {
             )
         }
 
-        let conversion = converter.convert(lower)
+        // 2. Делегируем всю scoring-логику в `LayoutConverter`.  Если он
+        //    говорит «auto» — сразу отдаём.  Если отказывает — берём
+        //    `LayoutRejection` и транслируем в `ConversionDecision`.
+        let result = converter.convertWithDiagnostics(typed)
+        let dictHit: String? = dictionary.isKnown(typed.lowercased(), language: sourceLang)
+            ? (sourceLang == .english ? "en" : "ru")
+            : nil
 
-        if let conversion = conversion {
+        if let conversion = result.success {
             let targetLanguage: KeyboardLanguage = sourceLang == .english ? .russian : .english
             return ConversionDecision(
                 outcome: .auto,
                 convertedText: conversion.text,
                 sourceLanguage: sourceLang,
                 targetLanguage: targetLanguage,
-                dictionaryHit: dictionary.isKnown(lower, language: sourceLang) ? sourceLang == .english ? "en" : "ru" : nil,
+                dictionaryHit: dictHit,
                 rejectionReason: nil
             )
         }
 
-        let dictHitSource = dictionary.isKnown(lower, language: sourceLang) ? (sourceLang == .english ? "en" : "ru") : nil
-        let sourceScore = converter.score(lower, as: sourceLang)
-        let targetScore: Int
-        let targetLang: KeyboardLanguage
-
-        if lower.allSatisfy({ $0.isASCII && ($0.isLetter || "`[];',.".contains($0)) }) {
-            targetLang = .russian
-            let mapped = converter.map(lower, using: converter.englishToRussian)
-            targetScore = converter.score(mapped, as: .russian)
-        } else if lower.allSatisfy({ LayoutConverter.russianKeys.contains($0) }) {
-            targetLang = .english
-            let mapped = converter.map(lower, using: converter.russianToEnglish)
-            targetScore = converter.score(mapped, as: .english)
-        } else {
-            return ConversionDecision(
-                outcome: .fallback(reason: .other("mixed_layout")),
-                sourceLanguage: sourceLang,
-                sourceScore: sourceScore,
-                rejectionReason: "mixed layout characters"
-            )
+        // 3. Транслируем причину отказа в `ConversionDecision`.  Все
+        //    метрики (`sourceScore`/`targetScore`) уже посчитаны в
+        //    `LayoutConverter` — повторно не вычисляем.
+        guard let rejection = result.rejection else {
+            return nil
         }
 
-        if lower.allSatisfy({ LayoutConverter.russianKeys.contains($0) }) {
-            let pairs = zip(lower, lower.dropFirst()).map { String([$0, $1]) }
-            let hasSuspiciousCharacter = lower.contains { LayoutConverter.suspiciousRussianCharacters.contains($0) }
-            let hasSuspiciousPair = pairs.contains { LayoutConverter.suspiciousRussianPairs.contains($0) }
-            let sourceLooksPlausible = sourceScore >= 3
-            let targetIsMuchBetter = targetScore - sourceScore >= 6
-
-            if (hasSuspiciousCharacter || hasSuspiciousPair || !sourceLooksPlausible) && targetIsMuchBetter {
-                return ConversionDecision(
-                    outcome: .fallback(reason: .suspiciousCharacter),
-                    sourceLanguage: sourceLang,
-                    targetLanguage: targetLang,
-                    sourceScore: sourceScore,
-                    targetScore: targetScore,
-                    dictionaryHit: dictHitSource,
-                    rejectionReason: "suspicious russian layout"
-                )
-            }
-        }
-
-        if targetScore < 2 || targetScore - sourceScore < 3 {
-            return ConversionDecision(
-                outcome: .fallback(reason: .lowConfidence),
-                sourceLanguage: sourceLang,
-                targetLanguage: targetLang,
-                sourceScore: sourceScore,
-                targetScore: targetScore,
-                dictionaryHit: dictHitSource,
-                rejectionReason: "targetScore < 2 or delta < 3"
-            )
-        }
+        let (fallbackReason, rejectionText) = mapRejection(rejection, sourceLang: sourceLang)
 
         return ConversionDecision(
-            outcome: .fallback(reason: .other("no_conversion")),
+            outcome: .fallback(reason: fallbackReason),
             sourceLanguage: sourceLang,
-            targetLanguage: targetLang,
-            sourceScore: sourceScore,
-            targetScore: targetScore,
-            dictionaryHit: dictHitSource,
-            rejectionReason: "layout converter returned nil"
+            targetLanguage: rejection.targetLanguage,
+            sourceScore: rejection.sourceScore,
+            targetScore: rejection.targetScore,
+            dictionaryHit: dictHit,
+            rejectionReason: rejectionText
         )
+    }
+
+    /// Транслирует низкоуровневую причину отказа `LayoutConverter` в
+    /// пользовательскую причину `ConversionBuilder`.  Единственное место,
+    /// где эти два набора причин сопоставляются.
+    private func mapRejection(
+        _ rejection: LayoutRejection,
+        sourceLang: KeyboardLanguage
+    ) -> (ConversionFallbackReason, String) {
+        switch rejection.reason {
+        case .tooShort:
+            return (.other("too_short_in_converter"), "word length < 3")
+        case .mixedLayout:
+            return (.other("mixed_layout"), "mixed layout characters")
+        case .sourceIsKnownCorrect:
+            return (.other("source_known"), "typed word is already in source-language dictionary")
+        case .targetUnknown:
+            return (.other("target_unknown"), "mapped word not in target dictionary")
+        case .sourceNotPlausible:
+            return (.suspiciousCharacter, "source layout looks plausible in target language")
+        case .lowConfidence:
+            return (.lowConfidence, "targetScore < 2 or delta < 3")
+        case .alreadyValid:
+            return (.other("already_valid_in_source_layout"), "source layout already plausible")
+        }
     }
 }

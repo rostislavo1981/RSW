@@ -1,6 +1,10 @@
+#if os(macOS)
 import Foundation
 import CoreGraphics
 import ServiceManagement
+#else
+import Foundation
+#endif
 
 // MARK: – Manual switch configuration
 public enum ManualSwitchTrigger: String, CaseIterable, Identifiable {
@@ -37,12 +41,16 @@ public enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
     }
 
     public var maskBit: UInt64 {
+        #if os(macOS)
         switch self {
         case .option, .rightOption: return CGEventFlags.maskAlternate.rawValue
         case .shift: return CGEventFlags.maskShift.rawValue
         case .command: return CGEventFlags.maskCommand.rawValue
         case .control: return CGEventFlags.maskControl.rawValue
         }
+        #else
+        return 0
+        #endif
     }
 
     public var keyCodes: Set<Int> {
@@ -55,6 +63,9 @@ public enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
         }
     }
 }
+
+#if os(macOS)
+import Combine
 
 public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
@@ -178,3 +189,4 @@ public final class AppSettings: ObservableObject {
         defaults.set(electronAllowedIdentifiers as [String], forKey: Keys.electronAllowedIdentifiers)
     }
 }
+#endif

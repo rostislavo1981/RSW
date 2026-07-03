@@ -17,10 +17,23 @@ final class KeyboardMonitor {
 
     private let converter = LayoutConverter()
     private let inputSources = InputSourceController()
+    /// Опциональный policy для тонкого контроля над allow/deny. Если `nil`
+    /// (по умолчанию для обратной совместимости), действует прежнее правило:
+    /// разрешено всё, кроме терминалов. После Phase 4 completion
+    /// `AppDelegate` инжектит сюда `DefaultAppPolicy` с реальной логикой.
+    private let appPolicy: AppPolicy?
+
+    init(appPolicy: AppPolicy? = nil) {
+        self.appPolicy = appPolicy
+    }
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var eventTapContext: Unmanaged<KeyboardMonitor>?
-    private var currentWord = ""
+    /// Phase 2 wire-in: WordBuffer теперь — единственный владелец состояния
+    /// текущего слова. `currentWord` доступен через `wordBuffer.currentWord`,
+    /// `lastTypedWord` — отдельное String-свойство, т.к. по семантике
+    /// относится к уже отправленному (а не буферизованному) слову.
+    private var wordBuffer = WordBuffer()
     private var lastTypedWord = ""
 
     private var lastModifierTapTime: CFTimeInterval = 0
@@ -40,18 +53,27 @@ final class KeyboardMonitor {
             (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.flagsChanged.rawValue)
         )
-        let retained = Unmanaged.passRetained(self)
-        eventTapContext = retained
-        let context = retained.toOpaque()
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: Self.callback,
-            userInfo: context
-        ) else {
-            return false
+        let tap: CFMachPort
+        do {
+            // Use a temporary local context for the tapCreate call.
+            // If tapCreate fails we throw away the Unmanaged reference
+            // to avoid leaking it (the previous implementation called
+            // Unmanaged.passRetained(self) before the failure check,
+            // which leaked KeyboardMonitor on every start() failure).
+            let probe = Unmanaged.passRetained(self)
+            guard let created = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: mask,
+                callback: Self.callback,
+                userInfo: probe.toOpaque()
+            ) else {
+                probe.release()
+                return false
+            }
+            tap = created
+            eventTapContext = probe
         }
 
         eventTap = tap
@@ -108,12 +130,12 @@ final class KeyboardMonitor {
                 type: type,
                 event: event,
                 text: textForLog,
-                currentWord: currentWord,
+                currentWord: wordBuffer.currentWord,
                 isTerminal: true,
                 decision: "terminal_passthrough"
             )
             RSWDiagnosticLogger.shared.logFocusedAX("terminal_passthrough")
-            currentWord = ""
+            wordBuffer.reset()
             lastTypedWord = ""
             modifierWasDown = false
             return Unmanaged.passUnretained(event)
@@ -124,7 +146,7 @@ final class KeyboardMonitor {
             type: type,
             event: event,
             text: textForLog,
-            currentWord: currentWord,
+            currentWord: wordBuffer.currentWord,
             isTerminal: false,
             decision: "received"
         )
@@ -162,23 +184,21 @@ final class KeyboardMonitor {
         if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate) {
             RSWDiagnosticLogger.shared.log("word_reset", [
                 "reason": "modifier",
-                "currentWordLength": currentWord.count
+                "currentWordLength": wordBuffer.currentWord.count
             ])
-            currentWord = ""
+            wordBuffer.reset()
             return Unmanaged.passUnretained(event)
         }
 
         if keyCode == 51 {
-            if !currentWord.isEmpty {
-                currentWord.removeLast()
-            }
+            wordBuffer.removeLast()
             return Unmanaged.passUnretained(event)
         }
 
         if settings.isExcludedKey(Int(keyCode)) {
             RSWDiagnosticLogger.shared.log("excluded_key_passthrough", [
                 "keyCode": keyCode,
-                "currentWordLength": currentWord.count
+                "currentWordLength": wordBuffer.currentWord.count
             ])
             return Unmanaged.passUnretained(event)
         }
@@ -186,24 +206,26 @@ final class KeyboardMonitor {
         guard let text = eventText(event), !text.isEmpty else {
             RSWDiagnosticLogger.shared.log("word_reset", [
                 "reason": "empty_text",
-                "currentWordLength": currentWord.count
+                "currentWordLength": wordBuffer.currentWord.count
             ])
-            currentWord = ""
+            wordBuffer.reset()
             return Unmanaged.passUnretained(event)
         }
 
         if text.allSatisfy({ $0.isLetter || "`[];',.".contains($0) }) {
-            currentWord += text
-            lastTypedWord = currentWord
+            for ch in text {
+                wordBuffer.append(ch)
+            }
+            lastTypedWord = wordBuffer.currentWord
             RSWDiagnosticLogger.shared.log("word_accumulate", [
-                "currentWordLength": currentWord.count,
+                "currentWordLength": wordBuffer.currentWord.count,
                 "textLength": text.count
             ])
             return Unmanaged.passUnretained(event)
         }
 
-        let word = currentWord
-        currentWord = ""
+        let word = wordBuffer.currentWord
+        wordBuffer.reset()
 
         guard isEnabled, word.count >= settings.minWordLength else {
             RSWDiagnosticLogger.shared.log("correction_skipped", [
@@ -260,6 +282,23 @@ final class KeyboardMonitor {
                 "wordLength": word.count,
                 "replacementLength": replacement.count,
                 "delimiterLength": delimiter.count,
+                "language": String(describing: language)
+            ])
+            return false
+        }
+
+        // Phase 4 wire-in: если policy задана, проверяем allow/deny по bundleID.
+        // Если policy не инжектирована (обратная совместимость), пропускаем
+        // проверку — действует прежнее поведение «разрешено всё, кроме терминалов».
+        if let appPolicy = self.appPolicy,
+           let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           !appPolicy.shouldAllowAutomaticReplacement(for: bundleID) {
+            rswDebugLog("[RSW] ПРИМЕНЕНИЕ: отклонено policy, bundleID=\(bundleID)")
+            RSWDiagnosticLogger.shared.log("correction_failed", [
+                "reason": "policy_denied",
+                "bundleID": bundleID,
+                "wordLength": word.count,
+                "replacementLength": replacement.count,
                 "language": String(describing: language)
             ])
             return false
@@ -353,6 +392,17 @@ final class KeyboardMonitor {
 
         guard wordEnd >= wordLength else {
             rswDebugLog("[RSW] AX: слово перед курсором короче ожидаемого, конецСлова=\(wordEnd), длинаСлова=\(wordLength)")
+            return false
+        }
+
+        // ─── Guard: не писать ничего, пока не убедимся, что подстрока ───────────
+        // прямо перед курсором реально соответствует `word`. Без этой проверки
+        // stale `lastTypedWord` или смещение курсора приведут к удалению
+        // символов из чужого текста. Защита — последний рубеж перед AX-set.
+        let actualRange = NSRange(location: wordEnd - wordLength, length: wordLength)
+        let actualSubstring = nsValue.substring(with: actualRange)
+        guard actualSubstring.caseInsensitiveCompare(word) == .orderedSame else {
+            rswDebugLog("[RSW] AX: подстрока перед курсором не совпала с ожидаемой, ожидалось=\(word), фактически=\(actualSubstring)")
             return false
         }
 
@@ -493,7 +543,7 @@ final class KeyboardMonitor {
             ])
             return
         }
-        currentWord = ""
+        wordBuffer.reset()
 
         rswDebugLog("[RSW] РУЧНОЕ: новаяДлина=\(conversion.text.count), язык=\(conversion.language)")
         if replaceWordBeforeCursorViaAX(
@@ -514,8 +564,10 @@ final class KeyboardMonitor {
             return
         }
 
+        // Если guard выше сработал на несовпадении подстроки — это другая
+        // причина, не ax_unavailable. Логируем отдельно.
         RSWDiagnosticLogger.shared.log("manual_switch_failed", [
-            "reason": "ax_unavailable",
+            "reason": "stale_or_mismatched_substring",
             "wordLength": word.count
         ])
     }

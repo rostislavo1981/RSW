@@ -94,4 +94,5 @@ Target fix:
 - [x] `swift build -c release` passes.
 - [x] README accurately describes disabled fallback behavior and known unsupported apps.
 - [x] Phase 3: `ConversionBuilder` + corpus-backed tests + resource-based dictionaries.
-- [x] Phase 4: app-level allow/deny policy for Electron apps, diagnostics menu item with latest failure, launch-agent documentation.
+- [ ] **Phase 2: `KeyboardMonitor` actually delegates to `WordBuffer`, `AppPolicy`, `AXTextReplacement` — classes exist and are tested but are not wired in; the coordinator is still 583 LOC.**
+- [ ] **Phase 4: `DefaultAppPolicy.shouldAllowAutomaticReplacement` is invoked from `KeyboardMonitor.applyCorrection`; currently no caller exists.**
