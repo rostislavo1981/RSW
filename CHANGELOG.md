@@ -5,7 +5,8 @@
 ### Added
 - Скрипты установки и запуска: `install.sh` (создаёт `.app`-бандл,
   регистрирует login item), `run.sh` (dev-режим), `uninstall.sh` (с
-  `--purge` для полной очистки).
+  `--purge` для полной очистки), `Makefile` (зеркало целей: build,
+  test, install, uninstall, clean).
 
 ### Removed
 - Удалена Docker-конфигурация (`Dockerfile`, `docker-compose.yml`,

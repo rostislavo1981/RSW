@@ -6,13 +6,30 @@
 
 ## Установка
 
+### Быстрый старт (make)
+
+```bash
+make build           # release-сборка
+make test            # 334 теста
+make install         # установить в /Applications
+make install LOGIN=1 # + зарегистрировать login item
+make uninstall       # удалить .app и login item
+make clean           # очистить build/ и .build/
+```
+
+### Прямой запуск скриптов
+
 ```bash
 ./install.sh                # установить в /Applications и зарегистрировать login item
 ./install.sh --no-login     # без автоматического запуска при входе
 ./install.sh --prefix ~/Apps  # установить в пользовательский каталог
+./run.sh --release          # release-сборка, запуск
+./run.sh --test             # только тесты
+./uninstall.sh              # удалить .app
+./uninstall.sh --purge      # + удалить словарь и логи
 ```
 
-Скрипт:
+Скрипт `install.sh`:
 1. Собирает `swift build -c release`.
 2. Упаковывает бинарь в `.app-бандл` с минимальным `Info.plist`
    (`LSUIElement = true` — без иконки в Dock, `NSHighResolutionCapable = true`).
