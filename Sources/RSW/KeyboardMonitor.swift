@@ -340,22 +340,65 @@ final class KeyboardMonitor {
         insertDelimiterIfMissing: Bool
     ) -> Bool {
         guard let focused = focusedAXElement() else {
+            rswDebugLog("[RSW] AX: нет активного элемента")
             return false
         }
 
+        // ── Логируем AX-роль и bundleID для диагностики ─────────────────
+        var roleValue: AnyObject?
+        let roleResult = AXUIElementCopyAttributeValue(focused, kAXRoleAttribute as CFString, &roleValue)
+        let role = (roleResult == .success) ? (roleValue as? String ?? "nil") : "error:\(roleResult.rawValue)"
+        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        rswDebugLog("[RSW] AX: роль=\(role), bundleID=\(bundleID)")
+
+        // ── Путь 1: kAXValueAttribute (стандартный текстовый элемент) ──────
         var currentValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(focused, kAXValueAttribute as CFString, &currentValue) == .success,
-              let value = currentValue as? String else {
-            rswDebugLog("[RSW] AX: не удалось прочитать значение")
-            return false
+        let valueResult = AXUIElementCopyAttributeValue(focused, kAXValueAttribute as CFString, &currentValue)
+        if valueResult == .success, let value = currentValue as? String {
+            rswDebugLog("[RSW] AX: kAXValueAttribute прочитан, длина=\(value.count)")
+            return replaceViaValueAttribute(
+                focused: focused,
+                word: word,
+                replacement: replacement,
+                delimiter: delimiter,
+                insertDelimiterIfMissing: insertDelimiterIfMissing,
+                currentValue: value
+            )
         }
 
+        rswDebugLog("[RSW] AX: kAXValueAttribute недоступен (код=\(valueResult.rawValue)), пробуем kAXSelectedText")
+
+        // ── Путь 2: kAXSelectedText (Excel, Google Docs и прочие нестандартные) ─
+        // В некоторых приложениях (Excel, веб-формы) kAXValueAttribute недоступен,
+        // но kAXSelectedTextAttribute работает. Стратегия:
+        //   1. Выделяем слово перед курсором (setSelectedTextRange)
+        //   2. Читаем выделенный текст как подтверждение
+        //   3. Заменяем выделение через setSelectedTextRange + typing
+        return replaceViaSelectedText(
+            focused: focused,
+            word: word,
+            replacement: replacement,
+            delimiter: delimiter,
+            insertDelimiterIfMissing: insertDelimiterIfMissing
+        )
+    }
+
+    // MARK: - Путь 1: замена через kAXValueAttribute
+
+    private func replaceViaValueAttribute(
+        focused: AXUIElement,
+        word: String,
+        replacement: String,
+        delimiter: String,
+        insertDelimiterIfMissing: Bool,
+        currentValue: String
+    ) -> Bool {
         guard let selectedRange = selectedTextRange(in: focused) else {
             rswDebugLog("[RSW] AX: не удалось прочитать диапазон выделения")
             return false
         }
 
-        let nsValue = value as NSString
+        let nsValue = currentValue as NSString
         let valueLength = nsValue.length
         let wordLength = (word as NSString).length
         let delimiterLength = (delimiter as NSString).length
@@ -395,10 +438,7 @@ final class KeyboardMonitor {
             return false
         }
 
-        // ─── Guard: не писать ничего, пока не убедимся, что подстрока ───────────
-        // прямо перед курсором реально соответствует `word`. Без этой проверки
-        // stale `lastTypedWord` или смещение курсора приведут к удалению
-        // символов из чужого текста. Защита — последний рубеж перед AX-set.
+        // ─── Guard: подстрока перед курсором должна совпадать с `word` ──────
         let actualRange = NSRange(location: wordEnd - wordLength, length: wordLength)
         let actualSubstring = nsValue.substring(with: actualRange)
         guard actualSubstring.caseInsensitiveCompare(word) == .orderedSame else {
@@ -408,20 +448,21 @@ final class KeyboardMonitor {
 
         let actualReplacement = replacement + (insertDelimiterIfMissing && !delimiterAlreadyInserted ? delimiter : "")
         let replaceRange = NSRange(location: wordEnd - wordLength, length: wordLength)
-        let mutable = NSMutableString(string: value)
+        let mutable = NSMutableString(string: currentValue)
         mutable.replaceCharacters(in: replaceRange, with: actualReplacement)
 
-        rswDebugLog("[RSW] AX: замена слова перед курсором, длинаЗначения=\(valueLength), диапазон={\(replaceRange.location), \(replaceRange.length)}, новаяДлина=\(actualReplacement.count), разделительУжеЕсть=\(delimiterAlreadyInserted)")
+        rswDebugLog("[RSW] AX: замена через kAXValue, диапазон={\(replaceRange.location), \(replaceRange.length)}, новаяДлина=\(actualReplacement.count), разделительУжеЕсть=\(delimiterAlreadyInserted)")
 
         let setResult = AXUIElementSetAttributeValue(focused, kAXValueAttribute as CFString, mutable)
         guard setResult == .success else {
             RSWDiagnosticLogger.shared.log("ax_set_failed", [
+                "path": "value",
                 "code": setResult.rawValue,
                 "valueLength": valueLength,
                 "rangeLocation": replaceRange.location,
                 "rangeLength": replaceRange.length
             ])
-            rswDebugLog("[RSW] AX: запись не удалась, код=\(setResult.rawValue)")
+            rswDebugLog("[RSW] AX: kAXValueAttribute запись не удалась, код=\(setResult.rawValue)")
             return false
         }
 
@@ -431,6 +472,154 @@ final class KeyboardMonitor {
         )
         setSelectedTextRange(caretRange, in: focused)
         return true
+    }
+
+    // MARK: - Путь 2: замена через kAXSelectedText (Excel, веб-формы)
+
+    private func replaceViaSelectedText(
+        focused: AXUIElement,
+        word: String,
+        replacement: String,
+        delimiter: String,
+        insertDelimiterIfMissing: Bool
+    ) -> Bool {
+        // В Excel и подобных приложениях курсор обычно стоит после введённого
+        // слова. Мы не можем прочитать весь текст (нет kAXValueAttribute), но
+        // можем:
+        //   1. Выделить N символов перед курсором (setSelectedTextRange)
+        //   2. Прочитать выделение (kAXSelectedTextAttribute) для подтверждения
+        //   3. Если совпало — записать замену через AXUIElementSetAttributeValue
+        //      для kAXSelectedTextAttribute (если поддерживается) или через
+        //      эмуляцию ввода (CGEvent).
+
+        let wordLength = (word as NSString).length
+        let delimiterLength = (delimiter as NSString).length
+
+        guard let originalRange = selectedTextRange(in: focused) else {
+            rswDebugLog("[RSW] AX (selectedText): не удалось прочитать диапазон выделения")
+            RSWDiagnosticLogger.shared.log("ax_selected_text_failed", [
+                "reason": "no_selected_range",
+                "wordLength": wordLength
+            ])
+            return false
+        }
+
+        guard originalRange.location != NSNotFound && originalRange.length == 0 else {
+            rswDebugLog("[RSW] AX (selectedText): курсор не в позиции (location=\(originalRange.location), length=\(originalRange.length))")
+            return false
+        }
+
+        // Если разделитель уже введён — сдвигаемся на его длину назад
+        let selectionStart = Int(originalRange.location) - wordLength
+        if delimiterLength > 0 && Int(originalRange.location) >= delimiterLength {
+            // Проверяем, есть ли разделитель между словом и курсором
+            // (в этом пути у нас нет полного текста, поэтому предполагаем,
+            // что разделитель уже введён — это корректировка после пробела)
+            // Ничего не делаем, выбираем только само слово
+        }
+        guard selectionStart >= 0 else {
+            rswDebugLog("[RSW] AX (selectedText): selectionStart < 0, начало=\(selectionStart)")
+            return false
+        }
+
+        let selectionRange = NSRange(location: selectionStart, length: wordLength)
+
+        // Шаг 1: Выделить слово перед курсором
+        guard setSelectedTextRange(selectionRange, in: focused) else {
+            rswDebugLog("[RSW] AX (selectedText): не удалось выделить диапазон {\(selectionRange.location), \(selectionRange.length)}")
+            return false
+        }
+
+        // Шаг 2: Прочитать выделенный текст для подтверждения
+        var selectedTextValue: AnyObject?
+        let selectedTextResult = AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &selectedTextValue)
+        guard selectedTextResult == .success,
+              let selectedText = selectedTextValue as? String else {
+            rswDebugLog("[RSW] AX (selectedText): не удалось прочитать kAXSelectedTextAttribute, код=\(selectedTextResult.rawValue)")
+            // Если не можем прочитать выделение — пробуем всё равно заменить,
+            // т.к. в Excel kAXSelectedTextAttribute может не поддерживаться,
+            // но setSelectedTextRange + set value может работать.
+            // Но без подтверждения — слишком опасно. Откатываем выделение.
+            setSelectedTextRange(originalRange, in: focused)
+            RSWDiagnosticLogger.shared.log("ax_selected_text_failed", [
+                "reason": "no_selected_text",
+                "code": selectedTextResult.rawValue,
+                "wordLength": wordLength
+            ])
+            return false
+        }
+
+        guard selectedText.caseInsensitiveCompare(word) == .orderedSame else {
+            rswDebugLog("[RSW] AX (selectedText): выделенный текст '\(selectedText)' не совпадает с ожидаемым '\(word)'")
+            setSelectedTextRange(originalRange, in: focused)
+            return false
+        }
+
+        rswDebugLog("[RSW] AX (selectedText): выделение подтверждено, '\(selectedText)' == '\(word)'")
+
+        // Шаг 3: Заменить выделенный текст
+        // Пробуем kAXSelectedTextAttribute — в некоторых приложениях работает
+        // запись через AXUIElementSetAttributeValue(kAXSelectedTextAttribute).
+        // В Excel это может не сработать, поэтому фолбэкаем на CGEvent.
+        let fullReplacement = replacement + (insertDelimiterIfMissing ? delimiter : "")
+
+        let setSelectedResult = AXUIElementSetAttributeValue(
+            focused, kAXSelectedTextAttribute as CFString, fullReplacement as CFTypeRef
+        )
+        if setSelectedResult == .success {
+            rswDebugLog("[RSW] AX (selectedText): замена через kAXSelectedTextAttribute успешна")
+            // Восстановим курсор после замены
+            let newCaretLocation = selectionStart + (fullReplacement as NSString).length
+            setSelectedTextRange(NSRange(location: newCaretLocation, length: 0), in: focused)
+            return true
+        }
+
+        rswDebugLog("[RSW] AX (selectedText): kAXSelectedTextAttribute не поддерживается (код=\(setSelectedResult.rawValue)), пробуем CGEvent")
+
+        // Шаг 4: Фолбэк — эмуляция ввода через CGEvent (удаляем выделение и
+        // вводим замену). Это работает в Excel и большинстве нестандартных полей.
+        // Удаляем выделенное слово (один Backspace для выделенного текста)
+        guard let deleteDown = CGEvent(keyboardEventSource: nil, virtualKey: 51, keyDown: true),
+              let deleteUp = CGEvent(keyboardEventSource: nil, virtualKey: 51, keyDown: false) else {
+            rswDebugLog("[RSW] AX (selectedText): не удалось создать CGEvent для Delete")
+            setSelectedTextRange(originalRange, in: focused)
+            return false
+        }
+        deleteDown.post(tap: CGEventTapLocation.cghidEventTap)
+        deleteUp.post(tap: CGEventTapLocation.cghidEventTap)
+
+        // Вводим замену посимвольно через CGEvent
+        for ch in fullReplacement {
+            typeCharacterViaCGEvent(ch)
+        }
+
+        rswDebugLog("[RSW] AX (selectedText): замена через CGEvent выполнена, длина=\(fullReplacement.count)")
+        RSWDiagnosticLogger.shared.log("correction_applied", [
+            "path": "selected_text_cg_event",
+            "wordLength": wordLength,
+            "replacementLength": fullReplacement.count
+        ])
+        return true
+    }
+
+    /// Ввод одного символа через CGEvent (фолбэк для приложений без AX-записи)
+    private func typeCharacterViaCGEvent(_ char: Character) {
+        let utf16 = Array(String(char).utf16)
+        guard let eventDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let eventUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { return }
+        eventDown.flags = []
+        eventDown.setIntegerValueField(CGEventField.keyboardEventKeycode, value: 0)
+        utf16.withUnsafeBufferPointer { ptr in
+            eventDown.keyboardSetUnicodeString(stringLength: ptr.count, unicodeString: ptr.baseAddress)
+        }
+        eventDown.post(tap: CGEventTapLocation.cghidEventTap)
+
+        eventUp.flags = []
+        eventUp.setIntegerValueField(CGEventField.keyboardEventKeycode, value: 0)
+        utf16.withUnsafeBufferPointer { ptr in
+            eventUp.keyboardSetUnicodeString(stringLength: ptr.count, unicodeString: ptr.baseAddress)
+        }
+        eventUp.post(tap: CGEventTapLocation.cghidEventTap)
     }
 
     // MARK: - Double-Option manual switch
