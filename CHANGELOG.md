@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] — 2026-07-03
+
+### Changed
+- **Phase 4: Runtime quality** — добавлен app-level allow/deny policy:
+  `DefaultAppPolicy` теперь применяет allow-list только к известным
+  Electron-приложениям, а не ко всем приложениям. Это восстанавливает
+  автоисправление в обычных редакторах.
+- Расширена настройка «Приложения» в UI: переключатель Electron allow-list,
+  список разрешённых bundle identifiers, кнопка «Добавить текущее приложение».
+- Меню «Открыть текущий лог» теперь показывает последнюю ошибку
+  (`correction_failed` / `manual_switch_failed`) из JSONL-лога в alert.
+- Добавлена документация по запуску как Launch Agent: `docs/LAUNCH_AGENT.md`.
+
+### Fixed
+- Удалён дубликат `AppSettings` (`Sources/RSW/AppSettings.swift`). Теперь весь
+  проект использует единый `SwitcherCore.AppSettings.shared`, поэтому UI и
+  core-логика всегда видят одинаковые настройки.
+- Свойства и enum-ы `SwitcherCore.AppSettings` (`manualSwitchTrigger`,
+  `manualSwitchModifier`, `excludedKeys`, `enableElectronAllowList`,
+  `electronAllowedIdentifiers` и другие) сделаны `public`, чтобы
+  `SettingsView` могла их читать/писать.
+
+### Tests
+- 319 тестов, 100% успех.
+
+### Documentation
+- Обновлён `docs/REFACTORING_PLAN.md`: Phase 4 отмечен как завершённый.
+
 ## [Unreleased] — 2026-07-02
 
 ### Changed

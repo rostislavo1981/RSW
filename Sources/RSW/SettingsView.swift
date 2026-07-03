@@ -18,6 +18,9 @@ struct SettingsView: View {
             ExcludedKeysTab(settings: settings, showKeyPicker: $showKeyPicker)
                 .tabItem { Label("Исключения", systemImage: "xmark.circle") }
 
+            ElectronPolicyTab(settings: settings)
+                .tabItem { Label("Приложения", systemImage: "app") }
+
             DictionaryTab()
                 .tabItem { Label("Словарь", systemImage: "book") }
         }
@@ -283,6 +286,50 @@ struct DictionaryTab: View {
             }
         }
         .padding()
+    }
+}
+
+struct ElectronPolicyTab: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        Form {
+            Section("Electron-приложения") {
+                Toggle("Проверять Electron-приложения", isOn: $settings.enableElectronAllowList)
+                Text("Автоисправление в Electron-редакторах (VS Code, Slack, Discord и т.д.) разрешается только для приложений из списка ниже.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if settings.enableElectronAllowList {
+                    Section("Разрешённые приложения") {
+                        ForEach(settings.electronAllowedIdentifiers, id: \.self) { bundleID in
+                            Text(bundleID)
+                        }
+                        .onDelete(perform: removeIdentifier)
+
+                        Button(action: addCurrentApp) {
+                            Label("Добавить текущее приложение", systemImage: "plus")
+                        }
+                        .disabled(currentAppBundleID == nil || settings.electronAllowedIdentifiers.contains(currentAppBundleID ?? ""))
+                    }
+                }
+            }
+        }
+        .padding()
+    }
+
+    private var currentAppBundleID: String? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    private func removeIdentifier(at offsets: IndexSet) {
+        settings.electronAllowedIdentifiers.remove(atOffsets: offsets)
+    }
+
+    private func addCurrentApp() {
+        guard let bundleID = currentAppBundleID,
+              !settings.electronAllowedIdentifiers.contains(bundleID) else { return }
+        settings.electronAllowedIdentifiers.append(bundleID)
     }
 }
 

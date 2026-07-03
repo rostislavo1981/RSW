@@ -79,7 +79,7 @@ Target fix:
 3. Add table-driven tests for false positives and false negatives.
 4. Move built-in dictionaries to resource files or generated Swift constants with source comments.
 
-### Phase 4: Runtime quality
+### Phase 4: Runtime quality ✅
 
 1. Add app-level allow/deny policy for auto-correction, starting with Electron editors where AX is unreliable.
 2. Add a visible diagnostics command/menu item: open current log file and show latest failure reason.
@@ -94,3 +94,4 @@ Target fix:
 - [x] `swift build -c release` passes.
 - [x] README accurately describes disabled fallback behavior and known unsupported apps.
 - [x] Phase 3: `ConversionBuilder` + corpus-backed tests + resource-based dictionaries.
+- [x] Phase 4: app-level allow/deny policy for Electron apps, diagnostics menu item with latest failure, launch-agent documentation.

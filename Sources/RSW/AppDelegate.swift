@@ -157,7 +157,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .appendingPathComponent("Library")
             .appendingPathComponent("Logs")
             .appendingPathComponent("RSW")
+
+        let latestFailure = readLatestFailure(from: url)
+        let message: String
+        if let failure = latestFailure {
+            message = "Последняя ошибка:\n\(failure)\n\nПапка с логами будет открыта после нажатия OK."
+        } else {
+            message = "Логи отсутствуют или не содержат ошибок.\n\nПапка с логами будет открыта после нажатия OK."
+        }
+
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.runModal()
         NSWorkspace.shared.open(url)
+    }
+
+    private func readLatestFailure(from logsDir: URL) -> String? {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: logsDir,
+            includingPropertiesForKeys: [.creationDateKey]
+        ) else { return nil }
+
+        let jsonlFiles: [URL] = files.filter { $0.pathExtension == "jsonl" }
+        guard let latestFile = jsonlFiles.max(by: { a, b in
+            let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+            let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast
+            return da < db
+        }) else { return nil }
+
+        guard let handle = try? FileHandle(forReadingFrom: latestFile) else { return nil }
+        defer { try? handle.close() }
+
+        guard let data = try? handle.readToEnd() else { return nil }
+        guard !data.isEmpty else { return nil }
+
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+
+        for line in lines.reversed() {
+            let trimmed = line.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            guard let data = trimmed.data(using: String.Encoding.utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let event = json["event"] as? String else { continue }
+
+            if event == "correction_failed" || event == "manual_switch_failed" {
+                if let reason = json["reason"] as? String {
+                    var appName = "?"
+                    var bundleID = "?"
+                    if let frontmostApp = json["frontmostApp"] as? [String: Any] {
+                        if let name = frontmostApp["localizedName"] as? String { appName = name }
+                        if let bid = frontmostApp["bundleIdentifier"] as? String { bundleID = bid }
+                    }
+                    let namePart = appName
+                    let bundlePart = bundleID
+                    return "[\(event)] \(reason) | \(namePart) (\(bundlePart))"
+                }
+            }
+        }
+
+        return nil
     }
 
     private func showCorrectionTooltip(source: String, replacement: String) {
