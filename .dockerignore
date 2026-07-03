@@ -1,6 +1,0 @@
-.git
-.build
-logs
-*.md
-.claude
-.pytest_cache

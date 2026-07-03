@@ -3,9 +3,14 @@
 ## [Unreleased] — 2026-07-03
 
 ### Added
-- Docker support для тестирования: `Dockerfile`, `docker-compose.yml`, `.dockerignore`.
-  `TestRunner` теперь работает в Docker (Linux) благодаря `#if os(macOS)` в
-  `AppSettings`, `AppPolicy`, `AXTextReplacement`.
+- Скрипты установки и запуска: `install.sh` (создаёт `.app`-бандл,
+  регистрирует login item), `run.sh` (dev-режим), `uninstall.sh` (с
+  `--purge` для полной очистки).
+
+### Removed
+- Удалена Docker-конфигурация (`Dockerfile`, `docker-compose.yml`,
+  `.dockerignore`). Тесты теперь запускаются через `./run.sh --test`
+  или `swift run TestRunner` (работает нативно на macOS).
 
 ### Changed
 - **Phase 4: Runtime quality** — добавлен app-level allow/deny policy:

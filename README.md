@@ -4,14 +4,34 @@
 на Apple Silicon. Приложение живёт в строке меню, хранит только текущее слово и
 не использует сеть.
 
-## Запуск
+## Установка
 
 ```bash
-swift run rsw
+./install.sh                # установить в /Applications и зарегистрировать login item
+./install.sh --no-login     # без автоматического запуска при входе
+./install.sh --prefix ~/Apps  # установить в пользовательский каталог
 ```
 
-При первом запуске macOS запросит доступ в **System Settings → Privacy & Security
-→ Accessibility**. После выдачи доступа перезапустите приложение.
+Скрипт:
+1. Собирает `swift build -c release`.
+2. Упаковывает бинарь в `.app-бандл` с минимальным `Info.plist`
+   (`LSUIElement = true` — без иконки в Dock, `NSHighResolutionCapable = true`).
+3. Копирует в `/Applications/RSW.app`.
+4. Регистрирует login item через AppleScript (`System Events`).
+
+При **первом** запуске macOS попросит доступ в
+**System Settings → Privacy & Security → Accessibility**.
+После выдачи доступа — запустите приложение ещё раз.
+
+Запуск: `open /Applications/RSW.app` или двойной клик в Finder.
+
+## Запуск в режиме разработки
+
+```bash
+swift run rsw            # debug-сборка, запуск
+./run.sh --release       # release-сборка, запуск
+./run.sh --test          # только тесты (334 проверки)
+```
 
 Неверно набранное слово исправляется после пробела или знака препинания. Например:
 
@@ -127,15 +147,12 @@ swift run TestRunner
 
 Готовый исполняемый файл: `.build/release/rsw`.
 
-### Docker
-
-Тесты можно запустить в Docker (Linux):
+### Удаление
 
 ```bash
-docker compose up --build
+./uninstall.sh            # удалить .app и снять login item
+./uninstall.sh --purge    # + удалить словарь и логи
 ```
-
-Логи пишутся в `./logs/`.
 
 ## Диагностика
 
