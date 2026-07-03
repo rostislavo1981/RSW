@@ -27,6 +27,7 @@
 
 ### Documentation
 - Обновлён `docs/REFACTORING_PLAN.md`: Phase 4 отмечен как завершённый.
+- Добавлен анализ диагностических логов: `docs/DIAGNOSTICS_ANALYSIS.md`.
 
 ## [Unreleased] — 2026-07-02
 

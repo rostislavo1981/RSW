@@ -199,6 +199,10 @@ RSW_DIAG=1 swift run rsw
 Для постоянной фоновой работы RSW можно настроить `launchd` (macOS Launch Agent).
 Подробности: [docs/LAUNCH_AGENT.md](docs/LAUNCH_AGENT.md).
 
+## Анализ диагностики
+
+Руководство по чтению и интерпретации логов: [docs/DIAGNOSTICS_ANALYSIS.md](docs/DIAGNOSTICS_ANALYSIS.md).
+
 ## Правила разработки
 
 - **Документация и версии** — обновлять CHANGELOG.md и README.md после
