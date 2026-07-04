@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwitcherCore
 
 func rswDebugLog(_ message: @autoclosure () -> String) {
     guard ProcessInfo.processInfo.environment["RSW_DEBUG"] == "1" else { return }
@@ -101,6 +102,42 @@ final class RSWDiagnosticLogger {
     func logFocusedAX(_ reason: String) {
         guard isEnabled else { return }
         log("focused_ax", focusedAXInfo(reason: reason))
+    }
+
+    /// Логирует решение `ConversionBuilder` о замене.
+    /// `event`: `correction_accepted` (auto), `correction_failed` (fallback).
+    func logDecision(_ decision: ConversionDecision, sourceLength: Int) {
+        guard isEnabled else { return }
+        var fields: [String: Any] = [
+            "sourceLength": sourceLength,
+            "outcome": describe(decision.outcome)
+        ]
+        if let lang = decision.sourceLanguage {
+            fields["sourceLanguage"] = lang == .russian ? "ru" : "en"
+        }
+        if capturesText, let text = decision.convertedText {
+            fields["convertedText"] = text
+        }
+        let event: String
+        if case .auto = decision.outcome {
+            event = "correction_accepted"
+        } else {
+            event = "correction_failed"
+        }
+        log(event, fields)
+    }
+
+    private func describe(_ outcome: ConversionOutcome) -> String {
+        switch outcome {
+        case .auto: return "auto"
+        case .fallback(let reason):
+            switch reason {
+            case .shortWord: return "fallback:shortWord"
+            case .suspiciousCharacter: return "fallback:suspiciousCharacter"
+            case .lowConfidence: return "fallback:lowConfidence"
+            case .other(let s): return "fallback:other:\(s)"
+            }
+        }
     }
 
     func logMemoryIfNeeded(interval: TimeInterval = 30) {

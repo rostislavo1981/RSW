@@ -2,80 +2,79 @@ import XCTest
 @testable import SwitcherCore
 
 // MARK: - ConversionDecision unit tests
+//
+// Тесты на реальный `ConversionBuilder` поверх `LayoutConverter` и
+// `WordDictionary` — без mock-объектов. `LayoutConverter` это `struct`,
+// поэтому subclass невозможен; вместо этого используем in-memory
+// `WordDictionary(storageURL: nil)`, который не пишет на диск и не
+// подмешивает built-in словарь для тестового слова.
+//
 final class ConversionDecisionTests: XCTestCase {
-    var builder: ConversionBuilder!
-    
+    private var builder: ConversionBuilder!
+    private var dict: WordDictionary!
+
     override func setUp() {
         super.setUp()
-        // Use a mock converter that returns deterministic results.
-        let mockConverter = MockConverter()
-        let mockDict = WordDictionary.shared
-        builder = ConversionBuilder(converter: mockConverter,
-                                    dictionary: mockDict,
+        // Изолированный in-memory словарь, не трогает `~/Library/...`.
+        dict = WordDictionary(storageURL: nil)
+        let converter = LayoutConverter(dictionary: dict)
+        builder = ConversionBuilder(converter: converter,
+                                    dictionary: dict,
                                     minWordLength: 3)
     }
-    
-    func test_autoOutcome_whenHighScoreDelta() {
-        // Arrange: a word that maps to a clearly better target language.
-        let decision = builder.buildDecision(from: "ghbdtn",
-                                             sourceLang: .english)
+
+    func test_autoOutcome_knownPair() {
+        // "ghbdtn" → "привет" — известная пара, должна пройти.
+        let decision = builder.buildDecision(from: "ghbdtn", sourceLang: .english)
         XCTAssertNotNil(decision)
-        if case .auto = decision?.outcome {
-            // Expected – auto conversion
-            XCTAssertEqual(decision?.convertedText, "привет")
-        } else {
-            XCTFail("Expected .auto outcome, got \(decision?.outcome)")
+        guard case .auto = decision?.outcome else {
+            XCTFail("Expected .auto, got \(String(describing: decision?.outcome))")
+            return
         }
+        XCTAssertEqual(decision?.convertedText, "привет")
     }
-    
+
     func test_fallbackReason_shortWord() {
-        let decision = builder.buildDecision(from: "a",
-                                             sourceLang: .english)
+        let decision = builder.buildDecision(from: "a", sourceLang: .english)
         XCTAssertNotNil(decision)
-        if case .fallback(let reason) = decision?.outcome {
-            XCTAssertEqual(reason, .shortWord)
-        } else {
-            XCTFail("Expected fallback with .shortWord reason")
+        guard case .fallback(let reason) = decision?.outcome else {
+            XCTFail("Expected fallback")
+            return
         }
+        XCTAssertEqual(reason, .shortWord)
     }
-    
-    func test_fallbackReason_suspiciousCharacter() {
-        // The mock converter marks "структуру" as suspicious.
-        let decision = builder.buildDecision(from: "структуру",
-                                             sourceLang: .russian)
+
+    func test_fallbackReason_knownInSourceDict() {
+        // "hello" в английском словаре → suspiciousCharacter.
+        let decision = builder.buildDecision(from: "hello", sourceLang: .english)
         XCTAssertNotNil(decision)
-        if case .fallback(let reason) = decision?.outcome {
-            XCTAssertEqual(reason, .suspiciousCharacter)
-        } else {
-            XCTFail("Expected fallback with .suspiciousCharacter reason")
+        guard case .fallback(let reason) = decision?.outcome else {
+            XCTFail("Expected fallback")
+            return
         }
+        XCTAssertEqual(reason, .suspiciousCharacter)
     }
-    
-    func test_fallbackReason_lowConfidence() {
-        // Use a word that returns a conversion but with low delta.
-        let decision = builder.buildDecision(from: "пример",
-                                             sourceLang: .russian)
+
+    func test_fallbackReason_noConversion() {
+        // "qqq" — три неалфавитных ASCII, не конвертируется.
+        let decision = builder.buildDecision(from: "qqq", sourceLang: .english)
         XCTAssertNotNil(decision)
-        if case .fallback(let reason) = decision?.outcome {
-            XCTAssertEqual(reason, .lowConfidence)
-        } else {
-            XCTFail("Expected fallback with .lowConfidence reason")
+        guard case .fallback(let reason) = decision?.outcome else {
+            XCTFail("Expected fallback")
+            return
         }
+        // Либо lowConfidence (скор не сошёлся), либо other("no_conversion").
+        // Главное что не auto.
+        if case .lowConfidence = reason { return }
+        if case .other(let s) = reason {
+            XCTAssertFalse(s.isEmpty, "other reason should carry payload")
+            return
+        }
+        XCTFail("Unexpected fallback reason: \(reason)")
     }
-    
-    // MARK: Helper mock
-    private final class MockConverter: LayoutConverter {
-        override public func convert(_ word: String) -> Conversion? {
-            // Very simple mapping – just return a dummy conversion for a few known words.
-            if word == "ghbdtn" { return Conversion(text: "привет", language: .russian) }
-            if word == "compars" { return Conversion(text: "пример", language: .russian) }
-            return nil
-        }
-        override public func score(_ value: String, as language: KeyboardLanguage) -> Int { 0 }
-        override public func isSuspiciousLayout(_ source: String,
-                                                converted: String,
-                                                sourceLanguage: KeyboardLanguage,
-                                                sourceScore: Int,
-                                                targetScore: Int) -> Bool { false }
+
+    func test_fallback_emptyInput() {
+        let decision = builder.buildDecision(from: "", sourceLang: .english)
+        XCTAssertNil(decision)
     }
 }

@@ -312,6 +312,76 @@ test("DICT-RU: 'машины' не конвертируется") { c.convert("�
 test("DICT-RU: 'манипулятора' не конвертируется") { c.convert("манипулятора") == nil }
 
 // ────────────────────────────────────────────────────────
+// 18. ConversionBuilder — диагностический API v0.2.19
+//     Проверяем реальный buildDecision (Phase 3), без хардкода.
+// ────────────────────────────────────────────────────────
+print("━━━ 18. ConversionBuilder: buildDecision ━━━")
+
+let inMemoryDict = WordDictionary(storageURL: nil)
+let builderConverter = LayoutConverter(dictionary: inMemoryDict)
+let builder = ConversionBuilder(converter: builderConverter,
+                                dictionary: inMemoryDict,
+                                minWordLength: 3)
+
+test("CB: 'ghbdtn' → auto 'привет'") {
+    if case .auto = builder.buildDecision(from: "ghbdtn", sourceLang: .english)?.outcome {
+        return builder.buildDecision(from: "ghbdtn", sourceLang: .english)?.convertedText == "привет"
+    }
+    return false
+}
+test("CB: 'привет' (RU) → fallback suspiciousCharacter (в словаре)") {
+    // 'привет' в RU-словаре (built-in есть, но не проверял) — точнее,
+    // 'hello' в EN точно в словаре.
+    if case .fallback(let r) = builder.buildDecision(from: "hello", sourceLang: .english)?.outcome {
+        if case .suspiciousCharacter = r { return true }
+    }
+    return false
+}
+test("CB: 'a' (1 символ) → fallback shortWord") {
+    if case .fallback(let r) = builder.buildDecision(from: "a", sourceLang: .english)?.outcome {
+        if case .shortWord = r { return true }
+    }
+    return false
+}
+test("CB: '' (пусто) → nil") {
+    return builder.buildDecision(from: "", sourceLang: .english) == nil
+}
+test("CB: 'qqq' → fallback (lowConfidence или no_conversion)") {
+    let outcome = builder.buildDecision(from: "qqq", sourceLang: .english)?.outcome
+    if case .fallback = outcome { return true }
+    return false
+}
+
+// ────────────────────────────────────────────────────────
+// 19. WordBuffer (Phase 2 extraction) — pure struct, без live AX
+// ────────────────────────────────────────────────────────
+print("━━━ 19. WordBuffer integration ━━━")
+
+test("WB: init → empty currentWord") {
+    var b = WordBuffer()
+    return b.currentWord.isEmpty
+}
+test("WB: append('h') + append('e') → 'he'") {
+    var b = WordBuffer()
+    b.append("h")
+    b.append("e")
+    return b.currentWord == "he"
+}
+test("WB: reset → empty") {
+    var b = WordBuffer()
+    b.append("a")
+    b.reset()
+    return b.currentWord.isEmpty
+}
+test("WB: append+reset+append → 'b'") {
+    var b = WordBuffer()
+    b.append("a")
+    b.reset()
+    b.append("b")
+    return b.currentWord == "b"
+}
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

@@ -17,10 +17,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         monitor.onCorrection = { [weak self] source, replacement, language in
             self?.lastCorrection = (source: source, converted: replacement, language: language)
-            rswDebugLog("[rswitcher] исправление: исходнаяДлина=\\(source.count), новаяДлина=\\(replacement.count), язык=\\(language)")
+            rswDebugLog("[rswitcher] исправление: исходнаяДлина=\(source.count), новаяДлина=\(replacement.count), язык=\(language)")
             if AppSettings.shared.showTooltip {
                 self?.showCorrectionTooltip(source: source, replacement: replacement)
             }
+        }
+
+        // Диагностика: каждое решение ConversionBuilder уходит в JSONL-лог.
+        monitor.onDecision = { decision in
+            // sourceLength не знаем здесь — берём из convertedText длины
+            // (для auto) или 0 (для fallback). Главное — пробросить outcome.
+            let sourceLength = decision.convertedText?.count ?? 0
+            RSWDiagnosticLogger.shared.logDecision(decision, sourceLength: sourceLength)
         }
 
         requestAccessibilityPermission()

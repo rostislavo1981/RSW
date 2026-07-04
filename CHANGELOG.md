@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.2.20] — 2026-07-04
+
+### Added (Phase 4)
+- **AppPolicy — Electron allow-list**: `KeyboardMonitor` теперь принимает
+  `AppPolicy` через `init` и запрашивает `shouldAllowAutomaticReplacement`
+  для bundle ID frontmost-приложения. По умолчанию `DefaultAppPolicy`
+  читает `AppSettings.electronAllowedIdentifiers` (Phase 4.1 плана).
+- **Manual switch — выделенный текст**: двойное нажатие модификатора
+  (настраивается в `Settings`) или заданная клавиша вызывают
+  `manualSwitchSelectedText()`. Если есть выделение — конвертируется через
+  `forceConvert` + `AXUIElementSetAttributeValue`. Если выделения нет —
+  ищется последнее слово перед курсором и заменяется через
+  `AXTextReplacement`. Без synthetic backspace, без pasteboard.
+- **onDecision callback**: каждое решение `ConversionBuilder`
+  (auto / fallback с причиной) пробрасывается в `onDecision` →
+  `RSWDiagnosticLogger.logDecision`, который пишет `correction_accepted`
+  или `correction_failed` в JSONL-лог.
+
+### Tests
+- Добавлены секции 18 (`ConversionBuilder: buildDecision`) и 19
+  (`WordBuffer integration`) в `TestRunner` — 311 тестов, 100% (было 302).
+- Переписаны XCTest-спеки `Tests/Phase2/word_buffer_spec.swift`,
+  `Tests/Phase3/conversion_decision_spec.swift`,
+  `Tests/Phase3/fp_fn_log_spec.swift`: убраны некорректные `override
+  LayoutConverter` (struct нельзя subclass-ить), вместо этого используется
+  in-memory `WordDictionary(storageURL: nil)` + реальный `LayoutConverter`.
+
+### Technical
+- `DebugLog.swift` импортирует `SwitcherCore` и предоставляет
+  `logDecision(_:sourceLength:)`.
+- `KeyboardMonitor` использует `CGEvent.keyboardGetUnicodeString` для
+  извлечения Unicode из event-tap callback (раньше был неверный вызов
+  `event.characters`, это API `NSEvent`).
+- Подтверждено: `XCTest` модуль недоступен на машинах с одними Command
+  Line Tools (без полного Xcode) — XCTest-цель включается только через
+  `RSW_ENABLE_XCTEST=1` и рассчитана на запуск под Xcode.
+
 ## [0.2.19] — 2026-07-04
 
 ### Fixed
