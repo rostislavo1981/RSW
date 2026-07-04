@@ -127,7 +127,12 @@ public final class AppSettings: ObservableObject {
             Keys.manualSwitchModifierKey: ManualSwitchModifier.option.rawValue,
             Keys.excludedKeys: [56, 60, 61],
             Keys.launchAtLogin: false,
-            Keys.enableElectronAllowList: true,
+            // По умолчанию allow-list ВЫКЛЮЧЕН (opt-in feature).
+            // Если оставить true — пользователь с пустым списком
+            // получает policy_denied для всех приложений, RSW
+            // не конвертирует нигде. Так было до v0.2.21 — критический
+            // баг "не работает".
+            Keys.enableElectronAllowList: false,
             Keys.electronAllowedIdentifiers: [] as [String]
         ])
 
@@ -142,6 +147,14 @@ public final class AppSettings: ObservableObject {
         self.launchAtLogin = defs.bool(forKey: Keys.launchAtLogin)
         self.enableElectronAllowList = defs.bool(forKey: Keys.enableElectronAllowList)
         self.electronAllowedIdentifiers = defs.stringArray(forKey: Keys.electronAllowedIdentifiers) ?? []
+
+        // Миграция v0.2.21: у пользователей, у которых `enableElectronAllowList`
+        // остался `true` (дефолт до этой версии), но allow-list пуст — RSW
+        // не конвертировал нигде. Сбрасываем в false, чтобы разблокировать.
+        if self.enableElectronAllowList && self.electronAllowedIdentifiers.isEmpty
+            && !defs.dictionaryRepresentation().keys.contains(Keys.enableElectronAllowList) {
+            self.enableElectronAllowList = false
+        }
 
         // Привести сохранённый флаг к фактическому состоянию системы:
         // пользователь мог изменить автозапуск через System Settings.
