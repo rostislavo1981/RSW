@@ -118,6 +118,26 @@ final class RSWDiagnosticLogger {
         if capturesText, let text = decision.convertedText {
             fields["convertedText"] = text
         }
+        // Детальная диагностика: что builder решал и почему отказал.
+        if capturesText {
+            switch decision.outcome {
+            case .auto:
+                if let text = decision.convertedText {
+                    fields["decision"] = "auto:'\(text)'"
+                }
+            case .fallback(let reason):
+                switch reason {
+                case .other(let msg):
+                    fields["decision"] = "fail:'\(msg)'"
+                case .shortWord:
+                    fields["decision"] = "fail:shortWord"
+                case .suspiciousCharacter:
+                    fields["decision"] = "fail:knownInSourceDict"
+                case .lowConfidence:
+                    fields["decision"] = "fail:lowConfidence"
+                }
+            }
+        }
         let event: String
         if case .auto = decision.outcome {
             event = "correction_accepted"

@@ -64,23 +64,48 @@ public final class ConversionBuilder {
         }
 
         // 3️⃣ LayoutConverter решает, можно ли сконвертировать.
-        guard let conversion = converter.convert(trimmed) else {
+        if let conversion = converter.convert(trimmed) {
+            // 4️⃣ Проверим, что целевой язык — противоположный источнику.
+            let targetLang: KeyboardLanguage = sourceLang == .russian ? .english : .russian
+            guard conversion.language == targetLang else {
+                return ConversionDecision(outcome: .fallback(reason: .other("same_layout")),
+                                          convertedText: nil,
+                                          sourceLanguage: sourceLang)
+            }
+            return ConversionDecision(outcome: .auto,
+                                      convertedText: conversion.text,
+                                      sourceLanguage: sourceLang)
+        }
+
+        // 3.5️⃣ Fallback через forceConvert (v0.2.21): если обычный convert
+        // отказал по score-gap, но forceConvert даёт валидную замену противоположной
+        // раскладки И исходное слово точно не в словаре sourceLang — это
+        // вероятно нужная замена. Score-gap был слишком строгим.
+        // Безопасность: converted должен быть известным словом в целевом
+        // словаре — это даёт высокую confidence (как в TestRunner TP-pair).
+        if let forced = converter.forceConvert(trimmed) {
+            let targetLang: KeyboardLanguage = sourceLang == .russian ? .english : .russian
+            guard forced.language == targetLang else {
+                return ConversionDecision(outcome: .fallback(reason: .other("same_layout:forced")),
+                                          convertedText: nil,
+                                          sourceLanguage: sourceLang)
+            }
+            let forcedLower = forced.text.lowercased()
+            // Проверяем что converted — известное слово в целевом языке.
+            if dictionary.isKnown(forcedLower, language: targetLang) {
+                return ConversionDecision(outcome: .auto,
+                                          convertedText: forced.text,
+                                          sourceLanguage: sourceLang)
+            }
+            // Целевое слово не в словаре — пусть обычный fallback сработает.
             return ConversionDecision(outcome: .fallback(reason: .other("no_conversion")),
                                       convertedText: nil,
                                       sourceLanguage: sourceLang)
         }
 
-        // 4️⃣ Проверим, что целевой язык — противоположный источнику.
-        let targetLang: KeyboardLanguage = sourceLang == .russian ? .english : .russian
-        guard conversion.language == targetLang else {
-            return ConversionDecision(outcome: .fallback(reason: .other("same_layout")),
-                                      convertedText: nil,
-                                      sourceLanguage: sourceLang)
-        }
-
-        // 5️⃣ Всё ок: автозамена.
-        return ConversionDecision(outcome: .auto,
-                                  convertedText: conversion.text,
+        // Совсем ничего не получилось.
+        return ConversionDecision(outcome: .fallback(reason: .other("no_conversion")),
+                                  convertedText: nil,
                                   sourceLanguage: sourceLang)
     }
 }

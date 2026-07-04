@@ -352,6 +352,24 @@ test("CB: 'qqq' → fallback (lowConfidence или no_conversion)") {
     return false
 }
 
+// v0.2.21: fallback через forceConvert + dictionary confirmation
+test("CB: 'руддщ' (RU) → auto 'hello' (через forceConvert fallback)") {
+    let decision = builder.buildDecision(from: "руддщ", sourceLang: .russian)
+    if case .auto = decision?.outcome {
+        return decision?.convertedText == "hello"
+    }
+    print("    [debug] decision=\(String(describing: decision))")
+    return false
+}
+test("CB: 'ghbdtn' (EN) → auto 'привет' (через forceConvert fallback)") {
+    let decision = builder.buildDecision(from: "ghbdtn", sourceLang: .english)
+    if case .auto = decision?.outcome {
+        return decision?.convertedText == "привет"
+    }
+    print("    [debug] decision=\(String(describing: decision))")
+    return false
+}
+
 // ────────────────────────────────────────────────────────
 // 19. WordBuffer (Phase 2 extraction) — pure struct, без live AX
 // ────────────────────────────────────────────────────────
