@@ -61,7 +61,7 @@ public final class AXTextReplacement {
         var attributeValue: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(focused, kAXValueAttribute as CFString, &attributeValue)
         guard status == .success, let nsValue = attributeValue as? NSString else { return false }
-        let valueLength = nsValue.length
+        let _ = nsValue.length
         
         // ---- Определяем позицию начала слова -------------------------------------------------
         guard let selectedRange = selectedRangeProvider(focused), selectedRange.length == 0 else { return false }

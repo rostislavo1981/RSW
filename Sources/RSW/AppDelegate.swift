@@ -7,9 +7,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let monitor = KeyboardMonitor()
     private var statusItem: NSStatusItem!
     private var enabledItem: NSMenuItem!
+    private var diagnosticsItem: NSMenuItem!
     private var lastCorrection: (source: String, converted: String, language: KeyboardLanguage)?
+    private var lastDecision: ConversionDecision?
     private var settingsWindow: NSWindow?
     private var tooltipResetTimer: Timer?
+    private var diagnosticsEnabled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -24,11 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Диагностика: каждое решение ConversionBuilder уходит в JSONL-лог.
-        monitor.onDecision = { decision in
-            // sourceLength не знаем здесь — берём из convertedText длины
-            // (для auto) или 0 (для fallback). Главное — пробросить outcome.
+        // В режиме diagnostics — также показываем результат в строке меню.
+        monitor.onDecision = { [weak self] decision in
+            self?.lastDecision = decision
             let sourceLength = decision.convertedText?.count ?? 0
             RSWDiagnosticLogger.shared.logDecision(decision, sourceLength: sourceLength)
+            if self?.diagnosticsEnabled == true {
+                self?.updateDiagnosticsStatus(decision)
+            }
         }
 
         requestAccessibilityPermission()
@@ -68,7 +74,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Настройки…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
 
-        // New menu item: Открыть текущий лог
+        // Diagnostics toggle
+        diagnosticsItem = NSMenuItem(
+            title: "Диагностика",
+            action: #selector(toggleDiagnostics),
+            keyEquivalent: "d"
+        )
+        diagnosticsItem.target = self
+        diagnosticsItem.state = .off
+        menu.addItem(diagnosticsItem)
         let openLogItem = NSMenuItem(title: "Открыть текущий лог",
                                      action: #selector(openLogFolder(_:)),
                                      keyEquivalent: "")
@@ -96,6 +110,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: – Actions
+    @objc private func toggleDiagnostics() {
+        diagnosticsEnabled.toggle()
+        diagnosticsItem.state = diagnosticsEnabled ? .on : .off
+        if !diagnosticsEnabled {
+            // Возвращаем обычную иконку.
+            statusItem.button?.title = monitor.isEnabled ? "⌨︎" : "⌨︎-"
+        } else if let decision = lastDecision {
+            updateDiagnosticsStatus(decision)
+        }
+    }
+
+    private func updateDiagnosticsStatus(_ decision: ConversionDecision) {
+        guard diagnosticsEnabled else { return }
+        let label: String
+        switch decision.outcome {
+        case .auto:
+            label = "✓"
+        case .fallback(let reason):
+            switch reason {
+            case .shortWord:           label = "✗<3"
+            case .suspiciousCharacter: label = "✗dict"
+            case .lowConfidence:       label = "✗?"
+            case .other(let msg):       label = "✗\(msg.prefix(4))"
+            }
+        }
+        statusItem.button?.title = "\(monitor.isEnabled ? "⌨︎" : "⌨︎-")[\(label)]"
+    }
+
     @objc private func toggleEnabled() {
         monitor.isEnabled.toggle()
         enabledItem.state = monitor.isEnabled ? .on : .off
