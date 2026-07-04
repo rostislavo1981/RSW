@@ -448,7 +448,12 @@ final class KeyboardMonitor {
 
         // Диагностическое решение от ConversionBuilder — единая точка
         // истины для всех авто-веток (Phase 3).
-        let sourceLang: KeyboardLanguage = typed.allSatisfy({ LayoutConverter.isRussianCharacter($0) })
+        //
+        // ВАЖНО: sourceLang определяется по набранному СЛОВУ, не по delimiter.
+        // Раньше брался `typed` (разделитель), и для русского слова с пробелом
+        // в конце всегда возвращалось .english → builder не находил замену.
+        // Это был корневой баг "RSW детектирует, но не конвертирует".
+        let sourceLang: KeyboardLanguage = word.allSatisfy({ LayoutConverter.isRussianCharacter($0) })
             ? .russian
             : .english
         let decision = decisionBuilder.buildDecision(from: word, sourceLang: sourceLang)
