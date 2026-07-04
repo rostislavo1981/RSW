@@ -106,7 +106,8 @@ final class RSWDiagnosticLogger {
 
     /// Логирует решение `ConversionBuilder` о замене.
     /// `event`: `correction_accepted` (auto), `correction_failed` (fallback).
-    func logDecision(_ decision: ConversionDecision, sourceLength: Int) {
+    /// `sourceText` — что именно пользователь набирал (для диагностики).
+    func logDecision(_ decision: ConversionDecision, sourceLength: Int, sourceText: String? = nil) {
         guard isEnabled else { return }
         var fields: [String: Any] = [
             "sourceLength": sourceLength,
@@ -117,6 +118,10 @@ final class RSWDiagnosticLogger {
         }
         if capturesText, let text = decision.convertedText {
             fields["convertedText"] = text
+        }
+        // Исходное слово (что набирал пользователь) — для диагностики no_conversion.
+        if capturesText, let text = sourceText {
+            fields["sourceText"] = text
         }
         // Детальная диагностика: что builder решал и почему отказал.
         if capturesText {

@@ -28,10 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Диагностика: каждое решение ConversionBuilder уходит в JSONL-лог.
         // В режиме diagnostics — также показываем результат в строке меню.
-        monitor.onDecision = { [weak self] decision in
+        monitor.onDecision = { [weak self] source, decision in
             self?.lastDecision = decision
             let sourceLength = decision.convertedText?.count ?? 0
-            RSWDiagnosticLogger.shared.logDecision(decision, sourceLength: sourceLength)
+            RSWDiagnosticLogger.shared.logDecision(decision,
+                                                    sourceLength: sourceLength,
+                                                    sourceText: source)
             if self?.diagnosticsEnabled == true {
                 self?.updateDiagnosticsStatus(decision)
             }

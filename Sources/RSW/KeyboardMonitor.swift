@@ -55,7 +55,7 @@ final class KeyboardMonitor {
     /// очередного слова-кандидата на замену. Сюда же уходят отказы —
     /// `.shortWord`, `.suspiciousCharacter`, `.other("no_conversion")`,
     /// `.other("policy_denied")` и т. п.
-    var onDecision: ((ConversionDecision) -> Void)?
+    var onDecision: ((String, ConversionDecision) -> Void)?
 
     /// Флаг активного автопереключения (привязан к настройке).
     var isEnabled: Bool = true
@@ -269,7 +269,7 @@ final class KeyboardMonitor {
     /// переключаем последнее набранное слово перед курсором.
     func manualSwitchSelectedText() {
         guard let focused = focusedAXElement() else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:no_focused_ax")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -288,7 +288,7 @@ final class KeyboardMonitor {
 
     private func replaceSelectedText(_ text: String, in focused: AXUIElement) {
         guard let conversion = converter.forceConvert(text) else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:no_conversion")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -303,7 +303,7 @@ final class KeyboardMonitor {
                                             kAXValueAttribute as CFString,
                                             &attrValue) == .success,
               let raw = attrValue as? NSString else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:ax_unavailable")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -320,7 +320,7 @@ final class KeyboardMonitor {
                                                        kAXValueAttribute as CFString,
                                                        replaced as CFString)
         guard writeStatus == .success else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:ax_set_failed")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -343,7 +343,7 @@ final class KeyboardMonitor {
               let rawValue = readStringAttribute(focused),
               let word = lastWordBeforeCursor(in: rawValue,
                                               cursor: selectedRange.location) else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:no_selection")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -352,7 +352,7 @@ final class KeyboardMonitor {
         }
 
         guard let conversion = converter.forceConvert(word) else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:no_conversion")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -376,7 +376,7 @@ final class KeyboardMonitor {
             insertDelimiterIfMissing: false
         )
         guard ok else {
-            onDecision?(ConversionDecision(
+            onDecision?("", ConversionDecision(
                 outcome: .fallback(reason: .other("manual:ax_set_failed")),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -438,7 +438,7 @@ final class KeyboardMonitor {
         let word = bufferBox.buffer.currentWord
         bufferBox.buffer.reset()
         guard word.count >= minWordLength else {
-            onDecision?(ConversionDecision(
+            onDecision?(word, ConversionDecision(
                 outcome: .fallback(reason: .shortWord),
                 convertedText: nil,
                 sourceLanguage: nil
@@ -457,7 +457,7 @@ final class KeyboardMonitor {
             ? .russian
             : .english
         let decision = decisionBuilder.buildDecision(from: word, sourceLang: sourceLang)
-        onDecision?(decision ?? ConversionDecision(
+        onDecision?(word, decision ?? ConversionDecision(
             outcome: .fallback(reason: .other("empty")),
             convertedText: nil,
             sourceLanguage: sourceLang
@@ -472,7 +472,7 @@ final class KeyboardMonitor {
         // только если bundle ID в allow-list (Phase 4.1).
         if let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
            !policy.shouldAllowAutomaticReplacement(for: bid) {
-            onDecision?(ConversionDecision(
+            onDecision?(word, ConversionDecision(
                 outcome: .fallback(reason: .other("policy_denied:\(bid)")),
                 convertedText: nil,
                 sourceLanguage: sourceLang
