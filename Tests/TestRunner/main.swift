@@ -382,6 +382,34 @@ test("WB: append+reset+append → 'b'") {
 }
 
 // ────────────────────────────────────────────────────────
+// 20. AppPolicy — критический баг, который делал RSW полностью сломанным
+// ────────────────────────────────────────────────────────
+print("━━━ 20. AppPolicy: allow-list off → allow all ━━━")
+
+let testSettings = AppSettings()
+let offPolicy = DefaultAppPolicy(settings: testSettings)
+testSettings.enableElectronAllowList = false
+testSettings.electronAllowedIdentifiers = []  // пусто, не должно мешать
+
+test("AP: off → разрешает любое приложение") {
+    return offPolicy.shouldAllowAutomaticReplacement(for: "com.apple.TextEdit") == true
+}
+test("AP: off → разрешает несуществующий bundle") {
+    return offPolicy.shouldAllowAutomaticReplacement(for: "com.example.bogus") == true
+}
+
+let onPolicy = DefaultAppPolicy(settings: testSettings)
+testSettings.enableElectronAllowList = true
+testSettings.electronAllowedIdentifiers = ["com.microsoft.VSCode"]
+
+test("AP: on + list содержит → разрешает") {
+    return onPolicy.shouldAllowAutomaticReplacement(for: "com.microsoft.VSCode") == true
+}
+test("AP: on + list не содержит → запрещает") {
+    return onPolicy.shouldAllowAutomaticReplacement(for: "com.apple.Safari") == false
+}
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

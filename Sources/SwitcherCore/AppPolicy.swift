@@ -18,9 +18,11 @@ public final class DefaultAppPolicy: AppPolicy {
     }
     
     public func shouldAllowAutomaticReplacement(for bundleID: String) -> Bool {
-        // If the whitelist feature is disabled, we deny every app.
-        guard settings.enableElectronAllowList else { return false }
-        // Allow only those bundle IDs that are explicitly listed.
+        // Если фича allow-list ВЫКЛЮЧЕНА — пропускаем все приложения.
+        // (Раньше здесь ошибочно стоял `return false`, из-за чего RSW
+        // запрещал замену ВЕЗДЕ, даже когда feature off.)
+        guard settings.enableElectronAllowList else { return true }
+        // Включена: пропускаем только bundle ID из allow-list.
         return settings.electronAllowedIdentifiers.contains(bundleID)
     }
 }
