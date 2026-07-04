@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import SwiftUI
 import SwitcherCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -60,7 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // New menu item: Открыть текущий лог
-        let openLogItem = NSMenuItem(title: "Открыть текущий лог", action: #selector(openLogFolder(_:)))
+        let openLogItem = NSMenuItem(title: "Открыть текущий лог",
+                                     action: #selector(openLogFolder(_:)),
+                                     keyEquivalent: "")
         menu.addItem(openLogItem)
 
         let addLastItem = NSMenuItem(
@@ -149,11 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openLogFolder(_ sender: Any?) {
         // Resolve the logs directory: ~/Library/Logs/RSW (or the custom path from settings)
-        let logsURL = FileManager.default.urls(for: .logsDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("RSW") ?? URL(fileURLWithPath: "~/Library/Logs/RSW")
-        let url = URL(fileURLWithPath: url.path)
-        NSWorkspace.shared.open(url)
+        let logsURL = URL(fileURLWithPath: NSString("~/Library/Logs/RSW").expandingTildeInPath)
+        NSWorkspace.shared.open(logsURL)
     }
 
     private func showCorrectionTooltip(source: String, replacement: String) {

@@ -1,7 +1,6 @@
 import Foundation
 import CoreFoundation
 import ApplicationServices
-import SwitcherCore
 
 /** AXTextReplacement – небольшая оболочка над raw‑AX‑вызовами,
 которая знает, как:
@@ -66,16 +65,14 @@ public final class AXTextReplacement {
         
         // ---- Определяем позицию начала слова -------------------------------------------------
         guard let selectedRange = selectedRangeProvider(focused), selectedRange.length == 0 else { return false }
-        var wordStart = selectedRange.location
-        var wordEnd = wordStart
-        
+        let wordStart = selectedRange.location
+
         // Если перед словом уже есть delimiter и мы НЕ хотим его вставлять,
-        // удерживаем `wordEnd` как есть, иначе сдвигаем на длину delimiter’а.
-        var adjustedWordEnd = wordEnd
-        if !delimiterPresent && insertDelimiterIfMissing {
-            // Добавляем разделитель (пробел) в конец замены.
-            // Никаких изменений координат не требуется – placeholder остаётся тем же.
-        }
+        // длина слова остаётся прежней; иначе добавляем пробел в `fullReplacement`
+        // и заменяем ровно `wordLength` символов перед курсором. Координаты
+        // selectedRange в этом случае не меняются.
+        _ = delimiterPresent
+        _ = insertDelimiterIfMissing
         
         // ---- Формируем диапазон замены -------------------------------------------------------
         let replaceStart = wordStart - wordLength
@@ -89,14 +86,17 @@ public final class AXTextReplacement {
         // ---- Выполняем замену в строке -------------------------------------------------------
         let mutable = NSMutableString(string: (nsValue as String))
         mutable.replaceCharacters(in: replaceRange, with: fullReplacement)
-        
+
+        // ---- Записываем новое значение обратно в AX element ---------------------------------
+        let writeStatus = AXUIElementSetAttributeValue(focused,
+                                                      kAXValueAttribute as CFString,
+                                                      mutable as CFString)
+        guard writeStatus == .success else { return false }
+
         // ---- Устанавливаем новое Selected Text Range -----------------------------------------
         let newCaretLocation = replaceStart + fullReplacement.count
         let newRange = NSRange(location: newCaretLocation, length: 0)
-        let setOK = setSelectedRangeProvider(focused, newRange)
-        
-        // ---- Сохраняем новое значение в AX element -----------------------------------------
-        mutable.setValue(fullReplacement, forKey: (kAXValueAttribute as String))
+        _ = setSelectedRangeProvider(focused, newRange)
         return true
     }
     

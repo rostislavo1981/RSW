@@ -1,16 +1,15 @@
 import Foundation
 import CoreGraphics
 import ServiceManagement
-import SwitcherCore
 
 // MARK: – Manual switch configuration
-enum ManualSwitchTrigger: String, CaseIterable, Identifiable {
+public enum ManualSwitchTrigger: String, CaseIterable, Identifiable {
     case doubleModifier
     case key
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .doubleModifier: return "Двойное нажатие модификатора"
         case .key: return "Клавиша / комбинация"
@@ -18,16 +17,16 @@ enum ManualSwitchTrigger: String, CaseIterable, Identifiable {
     }
 }
 
-enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
+public enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
     case option = 58          // левый ⌥
     case rightOption = 61
     case shift = 56           // левый ⇧
     case command = 55         // ⌘
     case control = 59         // ⌃
 
-    var id: Int { rawValue }
+    public var id: Int { rawValue }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .option: return "⌥ Option"
         case .rightOption: return "⌥ Option (правый)"
@@ -37,7 +36,7 @@ enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
         }
     }
 
-    var maskBit: UInt64 {
+    public var maskBit: UInt64 {
         switch self {
         case .option, .rightOption: return CGEventFlags.maskAlternate.rawValue
         case .shift: return CGEventFlags.maskShift.rawValue
@@ -46,7 +45,7 @@ enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
         }
     }
 
-    var keyCodes: Set<Int> {
+    public var keyCodes: Set<Int> {
         switch self {
         case .option:      return [58, 61]
         case .rightOption: return [58, 61]
@@ -57,36 +56,36 @@ enum ManualSwitchModifier: Int, CaseIterable, Identifiable {
     }
 }
 
-final class AppSettings: ObservableObject {
+public final class AppSettings: ObservableObject {
     /// Shared singleton used throughout the project.
     public static let shared = AppSettings()
 
     // MARK: – Manual switch configuration
-    @Published var manualSwitchTrigger: ManualSwitchTrigger {
+    @Published public var manualSwitchTrigger: ManualSwitchTrigger {
         didSet { save() }
     }
-    @Published var manualSwitchModifierKey: Int {
+    @Published public var manualSwitchModifierKey: Int {
         didSet { save() }
     }
-    @Published var autoSwitchEnabled: Bool {
+    @Published public var autoSwitchEnabled: Bool {
         didSet { save() }
     }
-    @Published var minWordLength: Int {
+    @Published public var minWordLength: Int {
         didSet { save() }
     }
-    @Published var showTooltip: Bool {
+    @Published public var showTooltip: Bool {
         didSet { save() }
     }
-    @Published var manualSwitchKeyCode: Int {
+    @Published public var manualSwitchKeyCode: Int {
         didSet { save() }
     }
-    @Published var manualSwitchModifiers: Int {
+    @Published public var manualSwitchModifiers: Int {
         didSet { save() }
     }
-    @Published var excludedKeys: [Int] {
+    @Published public var excludedKeys: [Int] {
         didSet { save() }
     }
-    @Published var launchAtLogin: Bool {
+    @Published public var launchAtLogin: Bool {
         didSet {
             save()
             applyLaunchAtLogin()
@@ -116,7 +115,7 @@ final class AppSettings: ObservableObject {
         static let electronAllowedIdentifiers = "electronAllowedIdentifiers"
     }
 
-    init() {
+    public init() {
         let defs = UserDefaults.standard
         defs.register(defaults: [
             Keys.autoSwitchEnabled: true,
@@ -153,7 +152,7 @@ final class AppSettings: ObservableObject {
     }
 
     /// Returns `true` if the given keycode is listed in the exclusion list.
-    func isExcludedKey(_ keyCode: Int) -> Bool {
+    public func isExcludedKey(_ keyCode: Int) -> Bool {
         excludedKeys.contains(keyCode)
     }
 
@@ -171,7 +170,7 @@ final class AppSettings: ObservableObject {
     }
 
     /// Persists all published properties to `UserDefaults`.
-    func save() {
+    public func save() {
         defaults.set(autoSwitchEnabled, forKey: Keys.autoSwitchEnabled)
         defaults.set(minWordLength, forKey: Keys.minWordLength)
         defaults.set(showTooltip, forKey: Keys.showTooltip)

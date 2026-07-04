@@ -1,5 +1,4 @@
 import AppKit
-import SwitcherCore
 
 /// Protocol that describes the policies governing whether the front‑most
 /// application should be allowed to undergo automatic text replacement.

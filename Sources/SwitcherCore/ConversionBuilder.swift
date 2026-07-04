@@ -1,5 +1,3 @@
-import SwitcherCore
-
 // MARK: - Decision types
 
 public enum ConversionOutcome: Equatable {
@@ -28,6 +26,9 @@ public struct ConversionDecision: Equatable {
 
 // MARK: - Conversion builder
 
+/// Строит диагностическое решение о замене: на основе `LayoutConverter`
+/// и `WordDictionary` решает, применять ли конвертацию, и возвращает причину,
+/// если нет. Используется для отладки/логирования.
 public final class ConversionBuilder {
     private let converter: LayoutConverter
     private let dictionary: WordDictionary
@@ -39,59 +40,47 @@ public final class ConversionBuilder {
         self.minWordLength = minWordLength
     }
 
-    /// Builds a `ConversionDecision` for the supplied typed string.
-    /// - Parameters:
-    ///   - typed: The raw characters typed by the user.
-    ///   - sourceLang: The language of the source layout (used only for
-    ///                 `convertedText` case‑preservation).
-    /// - Returns: An optional `ConversionDecision`; `nil` means “no decision”.
+    /// Возвращает `ConversionDecision` для введённого слова или `nil`,
+    /// если слово пустое. `sourceLang` — язык раскладки, на которой набирали.
     public func buildDecision(from typed: String, sourceLang: KeyboardLanguage) -> ConversionDecision? {
-        let lower = typed.lowercased()
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
 
-        // 1️⃣ Short‑word fallback (the test suite checks this explicitly)
+        let lower = trimmed.lowercased()
+
+        // 1️⃣ Слишком короткое — отказ по минимальной длине.
         if lower.count < minWordLength {
-            return fallback(reason: .shortWord)
-        }
-
-        // 2️⃣ Known auto‑conversion cases – high‑confidence TP
-        if lower == "ghbdtn" {
-            // “ghbdtn” → “привет”
-            return ConversionDecision(outcome: .auto,
-                                      convertedText: "привет",
-                                      sourceLanguage: sourceLang)
-        }
-        if lower == "abrakadab" {
-            // “abrakadab” → “абракадабра”
-            return ConversionDecision(outcome: .auto,
-                                      convertedText: "абракадабра",
+            return ConversionDecision(outcome: .fallback(reason: .shortWord),
+                                      convertedText: nil,
                                       sourceLanguage: sourceLang)
         }
 
-        // 3️⃣ Explicit fallback reasons used by the spec
-        if lower == "структуру" {
+        // 2️⃣ Слово уже известно в словаре для текущего языка —
+        // значит оно набрано в правильной раскладке, конвертировать не нужно.
+        if dictionary.isKnown(lower, language: sourceLang) {
             return ConversionDecision(outcome: .fallback(reason: .suspiciousCharacter),
                                       convertedText: nil,
                                       sourceLanguage: sourceLang)
         }
-        if lower == "будут" {
-            return ConversionDecision(outcome: .fallback(reason: .lowConfidence),
-                                      convertedText: nil,
-                                      sourceLanguage: sourceLang)
-        }
-        if lower == "xyz" {
-            return ConversionDecision(outcome: .fallback(reason: .other("unknown")),
+
+        // 3️⃣ LayoutConverter решает, можно ли сконвертировать.
+        guard let conversion = converter.convert(trimmed) else {
+            return ConversionDecision(outcome: .fallback(reason: .other("no_conversion")),
                                       convertedText: nil,
                                       sourceLanguage: sourceLang)
         }
 
-        // 4️⃣ Default fallback for any other unsupported input
-        return fallback(reason: .other("unsupported"))
-    }
+        // 4️⃣ Проверим, что целевой язык — противоположный источнику.
+        let targetLang: KeyboardLanguage = sourceLang == .russian ? .english : .russian
+        guard conversion.language == targetLang else {
+            return ConversionDecision(outcome: .fallback(reason: .other("same_layout")),
+                                      convertedText: nil,
+                                      sourceLanguage: sourceLang)
+        }
 
-    // Helper – creates a generic fallback decision
-    private func fallback(reason: ConversionFallbackReason) -> ConversionDecision {
-        ConversionDecision(outcome: .fallback(reason: reason),
-                           convertedText: nil,
-                           sourceLanguage: nil)
+        // 5️⃣ Всё ок: автозамена.
+        return ConversionDecision(outcome: .auto,
+                                  convertedText: conversion.text,
+                                  sourceLanguage: sourceLang)
     }
 }

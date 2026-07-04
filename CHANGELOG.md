@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.2.19] — 2026-07-04
+
+### Fixed
+- Сборка проекта восстановлена после извлечения Phase 2: `AppPolicy` снова
+  публичный, `AppSettings`/`ManualSwitchTrigger`/`ManualSwitchModifier`/
+  `WordBuffer` подняты до `public`, `Sources/RSW/AppSettings.swift` удалён как
+  дубликат.
+- `AXTextReplacement` теперь реально пишет результат обратно в `kAXValueAttribute`
+  через `AXUIElementSetAttributeValue` (раньше вызывался KVC на `NSMutableString`,
+  который ничего не записывал в AX — замены не происходило).
+- `KeyboardMonitor` переписан как координатор: `CGEvent.tapCreate` →
+  `WordBuffer` → `LayoutConverter.convert` → `AXTextReplacement`. Никаких
+  synthetic backspace или pasteboard fallback. Терминалы — pass-through
+  с `correction_failed: terminal_excluded` (логируется в `RSWDiagnosticLogger`).
+- Двойная проверка фокуса/приложения: после `AXUIElementSetAttributeValue`
+  повторно сверяется `frontmostApplication` и `AXIsProcessTrusted()` —
+  если что-то изменилось, исходный ввод не меняется.
+- `AppDelegate.openLogFolder`: исправлен неверный API `.logsDirectory` и
+  необъявленная переменная `url`. Добавлен `import SwiftUI` для
+  `NSHostingController`.
+
+### Added
+- `ConversionBuilder.buildDecision` теперь использует `LayoutConverter` и
+  `WordDictionary` вместо хардкода на 4 слова. Возвращает честный диагноз:
+  `.shortWord`, `.suspiciousCharacter` (слово уже в словаре для sourceLang),
+  `.other("no_conversion")` или `.other("same_layout")`.
+
+### Technical
+- Удалены `import SwitcherCore` из файлов самого модуля (warning'и).
+- Удалены неиспользуемые локальные `setOK`/`adjustedWordEnd` в
+  `AXTextReplacement`.
+- В `KeyboardMonitor` для получения Unicode из `CGEvent` используется
+  `keyboardGetUnicodeString` (раньше неверно вызывался `event.characters`,
+  это API `NSEvent`).
+
 ## [Unreleased] — 2026-07-02
 
 ### Fixed
