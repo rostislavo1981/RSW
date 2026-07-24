@@ -15,19 +15,32 @@ public final class WordDictionary {
         self.storageURL = storageURL
 
         let builtInEnglish: Set<String> = [
-            "the", "is", "it", "in", "on", "at", "to", "of", "and", "an",
-            "he", "we", "my", "do", "no", "so", "if", "me", "up", "us",
-            "be", "as", "am", "or", "by", "go", "ok", "hi",
-            "hello", "world", "test", "mac", "switch", "keyboard", "buffer"
+            "the", "be", "to", "of", "and", "a", "in", "that", "have", "i",
+            "it", "for", "not", "on", "with", "he", "as", "you", "do", "at",
+            "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
+            "or", "an", "will", "my", "one", "all", "would", "there", "their", "what",
+            "so", "up", "out", "if", "about", "who", "get", "which", "go", "me",
+            "when", "make", "can", "like", "time", "no", "just", "him", "know", "take",
+            "people", "into", "year", "your", "good", "some", "could", "them", "see", "other",
+            "than", "then", "now", "look", "only", "come", "its", "over", "think", "also",
+            "back", "after", "use", "two", "how", "our", "work", "first", "well", "way",
+            "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
+            "is", "was", "are", "were", "been", "has", "had", "did", "does", "doing",
+            "hello", "world", "test", "mac", "switch", "keyboard", "buffer", "app", "computer",
+            "always", "never", "sometimes", "works", "why", "where", "every", "problem"
         ]
         let builtInRussian: Set<String> = [
-            "и", "в", "не", "на", "я", "что", "он", "с", "а", "это",
-            "как", "все", "она", "так", "его", "но", "да", "ты", "к",
-            "у", "же", "вы", "за", "по", "из", "о", "от", "до", "ли",
-            "нет", "вот", "ну", "уж", "бы", "ей", "их", "сам", "уже",
-            "или", "ни", "если", "там", "где", "тут", "при", "над",
-            "тоже", "ему", "ей", "вас", "им", "нам", "ним",
-            "структуру", "будут", "буфер", "машины", "манипулятора"
+            "и", "в", "не", "на", "я", "быть", "он", "с", "что", "а",
+            "по", "это", "она", "к", "но", "мы", "за", "его", "то", "всё",
+            "из", "у", "они", "так", "ее", "сколько", "зачем", "уже", "вот", "когда",
+            "даже", "если", "нет", "можно", "надо", "тут", "там", "тоже", "очень", "сейчас",
+            "потом", "просто", "нужно", "потому", "почему", "снова", "дела", "работает", "переключает",
+            "всегда", "никогда", "иногда", "кажется", "приложение", "компьютер", "клавиатура", "мышь",
+            "экран", "окно", "текст", "файл", "папка", "система", "программа", "язык", "раскладка",
+            "ошибка", "вопрос", "ответ", "место", "время", "сегодня", "завтра", "вчера", "человек",
+            "друг", "дом", "работа", "часть", "жизнь", "год", "день", "рука", "раз", "город",
+            "слово", "лицо", "дверь", "вода", "огонь", "земля", "воздух", "машина", "дорога", "свет",
+            "мир", "сила", "ночь", "утро", "вечер", "деньги", "домой"
         ]
 
         let loaded = storageURL.map(Self.loadFromDisk) ?? (english: [], russian: [])
