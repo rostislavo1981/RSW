@@ -32,7 +32,11 @@ public struct ConversionDecision: Equatable {
 public final class ConversionBuilder {
     private let converter: LayoutConverter
     private let dictionary: WordDictionary
-    private let minWordLength: Int
+
+    /// Минимальная длина слова для конвертации. `var`, чтобы `KeyboardMonitor`
+    /// мог синхронизировать его с живой настройкой `AppSettings.minWordLength`
+    /// перед каждым решением (v0.2.23).
+    public var minWordLength: Int
 
     public init(converter: LayoutConverter, dictionary: WordDictionary, minWordLength: Int) {
         self.converter = converter
@@ -77,31 +81,11 @@ public final class ConversionBuilder {
                                       sourceLanguage: sourceLang)
         }
 
-        // 3.5️⃣ Fallback через forceConvert (v0.2.21): если обычный convert
-        // отказал по score-gap, но forceConvert даёт валидную замену противоположной
-        // раскладки И исходное слово точно не в словаре sourceLang — это
-        // вероятно нужная замена. Score-gap был слишком строгим.
-        // Безопасность: converted должен быть известным словом в целевом
-        // словаре — это даёт высокую confidence (как в TestRunner TP-pair).
-        if let forced = converter.forceConvert(trimmed) {
-            let targetLang: KeyboardLanguage = sourceLang == .russian ? .english : .russian
-            guard forced.language == targetLang else {
-                return ConversionDecision(outcome: .fallback(reason: .other("same_layout:forced")),
-                                          convertedText: nil,
-                                          sourceLanguage: sourceLang)
-            }
-            let forcedLower = forced.text.lowercased()
-            // Проверяем что converted — известное слово в целевом языке.
-            if dictionary.isKnown(forcedLower, language: targetLang) {
-                return ConversionDecision(outcome: .auto,
-                                          convertedText: forced.text,
-                                          sourceLanguage: sourceLang)
-            }
-            // Целевое слово не в словаре — пусть обычный fallback сработает.
-            return ConversionDecision(outcome: .fallback(reason: .other("no_conversion")),
-                                      convertedText: nil,
-                                      sourceLanguage: sourceLang)
-        }
+        // 3.5️⃣ Fallback через forceConvert удалён (v0.2.23): он был мёртвым
+        // кодом при minWordLength=3 (convert() сам проверяет словарь до скоринга),
+        // но при minWordLength=2 давал ложные авто-срабатывания:
+        // 'ша' → 'if', 'ру' → 'he', 'ше' → 'it'. Безопаснее не конвертировать,
+        // чем конвертировать не то слово.
 
         // Совсем ничего не получилось.
         return ConversionDecision(outcome: .fallback(reason: .other("no_conversion")),

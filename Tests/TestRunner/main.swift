@@ -352,8 +352,9 @@ test("CB: 'qqq' → fallback (lowConfidence или no_conversion)") {
     return false
 }
 
-// v0.2.21: fallback через forceConvert + dictionary confirmation
-test("CB: 'руддщ' (RU) → auto 'hello' (через forceConvert fallback)") {
+// v0.2.23: эти пары проходят через обычный convert() (dict-confirmation),
+// fallback через forceConvert удалён как мёртвый и FP-опасный код.
+test("CB: 'руддщ' (RU) → auto 'hello'") {
     let decision = builder.buildDecision(from: "руддщ", sourceLang: .russian)
     if case .auto = decision?.outcome {
         return decision?.convertedText == "hello"
@@ -361,7 +362,7 @@ test("CB: 'руддщ' (RU) → auto 'hello' (через forceConvert fallback)"
     print("    [debug] decision=\(String(describing: decision))")
     return false
 }
-test("CB: 'ghbdtn' (EN) → auto 'привет' (через forceConvert fallback)") {
+test("CB: 'ghbdtn' (EN) → auto 'привет'") {
     let decision = builder.buildDecision(from: "ghbdtn", sourceLang: .english)
     if case .auto = decision?.outcome {
         return decision?.convertedText == "привет"
@@ -376,7 +377,7 @@ test("CB: 'ghbdtn' (EN) → auto 'привет' (через forceConvert fallbac
 print("━━━ 19. WordBuffer integration ━━━")
 
 test("WB: init → empty currentWord") {
-    var b = WordBuffer()
+    let b = WordBuffer()
     return b.currentWord.isEmpty
 }
 test("WB: append('h') + append('e') → 'he'") {
@@ -425,6 +426,69 @@ test("AP: on + list содержит → разрешает") {
 }
 test("AP: on + list не содержит → запрещает") {
     return onPolicy.shouldAllowAutomaticReplacement(for: "com.apple.Safari") == false
+}
+
+// ────────────────────────────────────────────────────────
+// 21. AXTextReplacement — bounds guard (крэш-регрессия v0.2.23)
+//     replaceWordBeforeCursor падал с NSRangeException, когда курсор
+//     стоял ближе к началу строки, чем длина слова (wordStart < wordLength):
+//     replaceStart = wordStart - wordLength уходил в минус. Вынесенный
+//     helper должен возвращать nil вместо отрицательного range.
+// ────────────────────────────────────────────────────────
+print("━━━ 21. AXTextReplacement: bounds guard ━━━")
+
+test("AX: валидный range (wordStart=10, len=3, value=20)") {
+    AXTextReplacement.replacementRange(wordStart: 10, wordLength: 3, valueLength: 20) == NSRange(location: 7, length: 3)
+}
+test("AX: wordStart < wordLength → nil (крэш-сценарий)") {
+    AXTextReplacement.replacementRange(wordStart: 2, wordLength: 3, valueLength: 20) == nil
+}
+test("AX: wordStart > valueLength → nil") {
+    AXTextReplacement.replacementRange(wordStart: 25, wordLength: 3, valueLength: 20) == nil
+}
+test("AX: wordStart == valueLength → валиден (конец строки)") {
+    AXTextReplacement.replacementRange(wordStart: 20, wordLength: 3, valueLength: 20) == NSRange(location: 17, length: 3)
+}
+test("AX: wordStart=0, wordLength=0 → валиден") {
+    AXTextReplacement.replacementRange(wordStart: 0, wordLength: 0, valueLength: 0) == NSRange(location: 0, length: 0)
+}
+
+// ────────────────────────────────────────────────────────
+// 22. ConversionBuilder — FP-безопасность при minWordLength=2
+//     Fallback через forceConvert (v0.2.21) был мёртвым кодом при min=3
+//     (convert() сам проверяет словарь до скоринга), но при min=2 давал
+//     ложные авто-срабатывания: 'ша' → 'if', 'ру' → 'he', 'ше' → 'it'.
+//     Fallback удалён — эти слова не должны конвертироваться автоматически.
+// ────────────────────────────────────────────────────────
+print("━━━ 22. ConversionBuilder: FP-безопасность min=2 ━━━")
+
+let fpBuilder = ConversionBuilder(converter: builderConverter, dictionary: inMemoryDict, minWordLength: 2)
+
+test("CB: 'ша' (RU, min=2) → НЕ auto (FP 'ша'→'if')") {
+    if case .auto = fpBuilder.buildDecision(from: "ша", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: 'ру' (RU, min=2) → НЕ auto (FP 'ру'→'he')") {
+    if case .auto = fpBuilder.buildDecision(from: "ру", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: 'ше' (RU, min=2) → НЕ auto (FP 'ше'→'it')") {
+    if case .auto = fpBuilder.buildDecision(from: "ше", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: minWordLength можно обновить после init (var)") {
+    let b = ConversionBuilder(converter: builderConverter, dictionary: inMemoryDict, minWordLength: 3)
+    b.minWordLength = 2
+    if case .auto = b.buildDecision(from: "ша", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
 }
 
 // ────────────────────────────────────────────────────────

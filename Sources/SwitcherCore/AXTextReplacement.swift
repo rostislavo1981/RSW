@@ -31,7 +31,19 @@ public final class AXTextReplacement {
         self.selectedRangeProvider = selectedRangeProvider
         self.setSelectedRangeProvider = setSelectedRangeProvider
     }
-    
+
+    // MARK: Bounds helper
+
+    /// Вычисляет диапазон замены слова перед курсором (в UTF‑16 координатах
+    /// `kAXValueAttribute`). Возвращает `nil`, если диапазон выходит за границы
+    /// строки — например, курсор стоит ближе к началу, чем длина слова
+    /// (`wordStart < wordLength`). В этом случае замена невозможна, и вызывающий
+    /// код должен вернуть `false`, а не падать с `NSRangeException`.
+    public static func replacementRange(wordStart: Int, wordLength: Int, valueLength: Int) -> NSRange? {
+        guard wordStart >= wordLength, wordStart <= valueLength else { return nil }
+        return NSRange(location: wordStart - wordLength, length: wordLength)
+    }
+
     // MARK: Public API
     /** \
      Заменяет `wordLength` символов, расположенных **перед** текущим курсором,
@@ -61,8 +73,7 @@ public final class AXTextReplacement {
         var attributeValue: CFTypeRef?
         let status = AXUIElementCopyAttributeValue(focused, kAXValueAttribute as CFString, &attributeValue)
         guard status == .success, let nsValue = attributeValue as? NSString else { return false }
-        let _ = nsValue.length
-        
+
         // ---- Определяем позицию начала слова -------------------------------------------------
         guard let selectedRange = selectedRangeProvider(focused), selectedRange.length == 0 else { return false }
         let wordStart = selectedRange.location
@@ -73,12 +84,18 @@ public final class AXTextReplacement {
         // selectedRange в этом случае не меняются.
         _ = delimiterPresent
         _ = insertDelimiterIfMissing
-        
+
         // ---- Формируем диапазон замены -------------------------------------------------------
-        let replaceStart = wordStart - wordLength
-        let replaceLength = wordLength
-        let replaceRange = NSRange(location: replaceStart, length: replaceLength)
-        
+        // Bounds guard (v0.2.23): если курсор стоит ближе к началу строки, чем
+        // длина слова, `wordStart - wordLength` ушёл бы в минус, и
+        // `replaceCharacters(in:)` упал бы с NSRangeException. Возвращаем false.
+        guard let replaceRange = Self.replacementRange(wordStart: wordStart,
+                                                       wordLength: wordLength,
+                                                       valueLength: nsValue.length) else {
+            return false
+        }
+        let replaceStart = replaceRange.location
+
         // ---- Формируем окончательный текст замены -------------------------------------------
         let suffix = (insertDelimiterIfMissing && !delimiterPresent) ? " " : ""
         let fullReplacement = replacement + suffix

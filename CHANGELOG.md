@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.2.23] — 2026-08-12
+
+### Fixed (стабильность и память — приоритет ревью)
+- **Крэш `NSRangeException` в AX-замене**: `replaceWordBeforeCursor` падал,
+  когда курсор стоял ближе к началу строки, чем длина слова
+  (`wordStart - wordLength` уходил в минус). Добавлен bounds guard через
+  `AXTextReplacement.replacementRange(wordStart:wordLength:valueLength:)` —
+  теперь возвращается `false` вместо крэша. Тот же риск в ручном
+  переключении закрыт автоматически (и мёртвый `wordRange` удалён).
+- **Утечка памяти на каждое нажатие**: в `CGEventTapCallBack` возвращался
+  `Unmanaged.passRetained(result)` для того же события, что система и так
+  освобождает (контракт `CGEventTypes.h:441-449`). Теперь `passUnretained`
+  для того же события, `passRetained` — только для нового.
+- **Буфер слова не сбрасывался**: при переключении приложения
+  (`NSWorkspace.didActivateApplicationNotification`) и при навигационных
+  клавишах (стрелки, Home/End/PageUp/PageDown) буфер теперь сбрасывается —
+  слово из одного приложения не заменяется в другом, курсор не «уезжает».
+  Добавлен кап длины буфера (64) против автоповтора клавиши.
+- **Настройки снова работают**: `KeyboardMonitor.isEnabled` — живое зеркало
+  `AppSettings.autoSwitchEnabled` (паттерн v0.2.2, сломан в v0.2.19);
+  `minWordLength` читается из настроек в момент использования и
+  синхронизируется с `ConversionBuilder` перед каждым решением.
+- **FP-риск при `minWordLength=2`**: удалён мёртвый fallback через
+  `forceConvert` в `ConversionBuilder` (v0.2.21). При min=2 он давал ложные
+  авто-срабатывания: `ша`→`if`, `ру`→`he`, `ше`→`it`. Безопаснее не
+  конвертировать, чем конвертировать не то слово.
+
+### Tests
+- Секция 21 `AXTextReplacement: bounds guard` — 5 тестов на
+  `replacementRange` (включая крэш-сценарий `wordStart < wordLength`).
+- Секция 22 `ConversionBuilder: FP-безопасность min=2` — 4 теста
+  (`ша`/`ру`/`ше` не конвертируются, `minWordLength` обновляем после init).
+- Итого 326 тестов, 100% (было 317).
+
 ## [0.2.20] — 2026-07-04
 
 ### Added (Phase 4)
