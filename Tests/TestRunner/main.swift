@@ -492,6 +492,34 @@ test("CB: minWordLength можно обновить после init (var)") {
 }
 
 // ────────────────────────────────────────────────────────
+// 23. AppSettings — инвариант allow-list (v0.2.23)
+//     Мёртвая миграция через dictionaryRepresentation() (зарегистрированные
+//     дефолты в неё попадают) не срабатывала никогда. Теперь инвариант
+//     «allow-list с пустым списком → off» применяется при загрузке настроек.
+// ────────────────────────────────────────────────────────
+print("━━━ 23. AppSettings: инвариант allow-list ━━━")
+
+let settingsDefaults = UserDefaults.standard
+let prevAllowList = settingsDefaults.bool(forKey: "enableElectronAllowList")
+let prevAllowedIds = settingsDefaults.stringArray(forKey: "electronAllowedIdentifiers")
+
+settingsDefaults.set(true, forKey: "enableElectronAllowList")
+settingsDefaults.set([], forKey: "electronAllowedIdentifiers")
+
+let settingsWithEmptyList = AppSettings()
+test("AP: allow-list true + пустой список → сброс в false при init") {
+    settingsWithEmptyList.enableElectronAllowList == false
+}
+
+// Восстанавливаем прежнее состояние, чтобы не влиять на другие тесты.
+settingsDefaults.set(prevAllowList, forKey: "enableElectronAllowList")
+if let prevAllowedIds {
+    settingsDefaults.set(prevAllowedIds, forKey: "electronAllowedIdentifiers")
+} else {
+    settingsDefaults.removeObject(forKey: "electronAllowedIdentifiers")
+}
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

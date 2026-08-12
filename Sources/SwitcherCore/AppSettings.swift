@@ -60,6 +60,11 @@ public final class AppSettings: ObservableObject {
     /// Shared singleton used throughout the project.
     public static let shared = AppSettings()
 
+    /// `true`, пока идёт `init` — подавляет `save()` и `applyLaunchAtLogin()`
+    /// из `didSet`. Иначе при старте было бы ~11 записей в UserDefaults,
+    /// а `applyLaunchAtLogin()` затирал бы выбор пользователя из System Settings.
+    private var isInitializing = true
+
     // MARK: – Manual switch configuration
     @Published public var manualSwitchTrigger: ManualSwitchTrigger {
         didSet { save() }
@@ -88,6 +93,10 @@ public final class AppSettings: ObservableObject {
     @Published public var launchAtLogin: Bool {
         didSet {
             save()
+            // К системе применяем только вне init: во время инициализации это
+            // делает синхронизация в init (см. ниже), иначе сохранённый флаг
+            // затёр бы выбор пользователя из System Settings (v0.2.23).
+            guard !isInitializing else { return }
             applyLaunchAtLogin()
         }
     }
@@ -148,20 +157,27 @@ public final class AppSettings: ObservableObject {
         self.enableElectronAllowList = defs.bool(forKey: Keys.enableElectronAllowList)
         self.electronAllowedIdentifiers = defs.stringArray(forKey: Keys.electronAllowedIdentifiers) ?? []
 
-        // Миграция v0.2.21: у пользователей, у которых `enableElectronAllowList`
-        // остался `true` (дефолт до этой версии), но allow-list пуст — RSW
-        // не конвертировал нигде. Сбрасываем в false, чтобы разблокировать.
-        if self.enableElectronAllowList && self.electronAllowedIdentifiers.isEmpty
-            && !defs.dictionaryRepresentation().keys.contains(Keys.enableElectronAllowList) {
+        // Сброс сломанного инварианта (v0.2.21; раньше это был мёртвый код —
+        // проверка через `dictionaryRepresentation()` всегда ложна, т.к.
+        // зарегистрированные дефолты в неё попадают). allow-list с пустым
+        // списком блокирует ВСЕ приложения — RSW «не работает» нигде.
+        // Такой инвариант не имеет смысла, сбрасываем в off.
+        if self.enableElectronAllowList && self.electronAllowedIdentifiers.isEmpty {
             self.enableElectronAllowList = false
         }
 
         // Привести сохранённый флаг к фактическому состоянию системы:
         // пользователь мог изменить автозапуск через System Settings.
+        // applyLaunchAtLogin() здесь НЕ вызывается (isInitializing == true) —
+        // иначе сохранённый флаг затёр бы выбор пользователя (v0.2.23).
         let actuallyEnabled = SMAppService.mainApp.status == .enabled
         if actuallyEnabled != self.launchAtLogin {
             self.launchAtLogin = actuallyEnabled
         }
+
+        // Инициализация завершена — сохраняем состояние один раз.
+        isInitializing = false
+        save()
     }
 
     /// Returns `true` if the given keycode is listed in the exclusion list.
@@ -184,6 +200,9 @@ public final class AppSettings: ObservableObject {
 
     /// Persists all published properties to `UserDefaults`.
     public func save() {
+        // Во время init didSet вызывается для каждого свойства — не пишем
+        // десятки раз. Состояние сохраняется один раз в конце init.
+        guard !isInitializing else { return }
         defaults.set(autoSwitchEnabled, forKey: Keys.autoSwitchEnabled)
         defaults.set(minWordLength, forKey: Keys.minWordLength)
         defaults.set(showTooltip, forKey: Keys.showTooltip)
