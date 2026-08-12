@@ -554,6 +554,22 @@ test("WD: remove тоже сохранил удаление") {
 try? FileManager.default.removeItem(at: testDictDir)
 
 // ────────────────────────────────────────────────────────
+// 25. TerminalApps — список терминалов и предикат (v0.2.23)
+//     Список вынесен в SwitcherCore, чтобы проверять его в TestRunner:
+//     известные терминалы распознаются, обычные приложения — нет.
+// ────────────────────────────────────────────────────────
+print("━━━ 25. TerminalApps: список терминалов ━━━")
+
+test("TAP: com.apple.Terminal — терминал") { TerminalApps.isTerminal("com.apple.Terminal") }
+test("TAP: iTerm2 — терминал") { TerminalApps.isTerminal("com.googlecode.iterm2") }
+test("TAP: Ghostty — терминал") { TerminalApps.isTerminal("com.mitchellh.ghostty") }
+test("TAP: Kitty — терминал") { TerminalApps.isTerminal("net.kovidgoyal.kitty") }
+test("TAP: Alacritty — терминал") { TerminalApps.isTerminal("org.alacritty") }
+test("TAP: Warp — терминал") { TerminalApps.isTerminal("dev.warp.Warp") }
+test("TAP: обычное приложение — не терминал") { !TerminalApps.isTerminal("com.apple.Safari") }
+test("TAP: пустая строка — не терминал") { !TerminalApps.isTerminal("") }
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 

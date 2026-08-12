@@ -46,6 +46,14 @@
   множеств делается под `NSLock` (дёшево), а запись выполняется на фоновой
   серийной очереди. Добавлен `flushPendingWrites()` для гарантированного
   сохранения перед завершением приложения.
+- **Per-keystroke `NSWorkspace`-запрос убран**: `isTerminalFocused()` и
+  policy-проверка дёргали `NSWorkspace.shared.frontmostApplication` на КАЖДОЕ
+  нажатие. Bundle ID активного приложения теперь кэшируется и обновляется
+  только по `didActivateApplicationNotification` (тот же observer, что
+  сбрасывает буфер). В `applyConversion` подтверждение «приложение не
+  сменилось» осталось на прямом чтении — путь конверсии не горячий, а
+  проверка должна быть свежей. Список терминалов вынесен в
+  `SwitcherCore.TerminalApps` (тестируемый предикат `isTerminal`).
 
 ### Tests
 - Секция 21 `AXTextReplacement: bounds guard` — 5 тестов на
@@ -57,7 +65,9 @@
   `UserDefaults`).
 - Секция 24 `WordDictionary: async save + flush` — 3 теста (add сохраняет
   на диск, remove сохраняет удаление, оба через фоновую очередь).
-- Итого 330 тестов, 100% (было 317).
+- Секция 25 `TerminalApps: список терминалов` — 8 тестов (Terminal, iTerm2,
+  Ghostty, Kitty, Alacritty, Warp распознаются; Safari и пустая строка — нет).
+- Итого 338 тестов, 100% (было 317).
 
 ## [0.2.20] — 2026-07-04
 

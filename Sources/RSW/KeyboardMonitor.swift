@@ -23,15 +23,9 @@ final class KeyboardMonitor {
     private static let maxBufferedWordLength = 64
 
     /// Терминалы, в которых RSW не работает (pass‑through).
-    private static let terminalBundleIdentifiers: Set<String> = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "dev.warp.Warp-Stable",
-        "dev.warp.Warp",
-        "com.mitchellh.ghostty",
-        "net.kovidgoyal.kitty",
-        "org.alacritty"
-    ]
+    /// Список и предикат живут в `SwitcherCore.TerminalApps` (тестируется в
+    /// TestRunner); здесь только обращение к ним.
+    private static let terminalBundleIdentifiers: Set<String> = TerminalApps.bundleIdentifiers
 
     // MARK: - Состояние
 
@@ -92,8 +86,16 @@ final class KeyboardMonitor {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    /// Observer переключения активного приложения — сбрасывает буфер слова.
+    /// Observer переключения активного приложения — сбрасывает буфер слова
+    /// и обновляет кэш frontmost-приложения.
     private var appSwitchObserver: NSObjectProtocol?
+
+    /// Кэш bundle ID активного приложения. `NSWorkspace.shared.frontmostApplication` —
+    /// дорогой системный запрос, а он нужен на КАЖДОЕ нажатие (isTerminalFocused,
+    /// policy-проверка). Кэшируем при первом использовании и обновляем только
+    /// по `didActivateApplicationNotification`. Доступ только с main (event tap
+    /// и observer оба на main run loop) — лок не нужен.
+    private var cachedFrontmostBundleIdentifier: String?
 
     // MARK: - Init
 
@@ -116,13 +118,17 @@ final class KeyboardMonitor {
         guard eventTap == nil else { return true }
 
         // Сброс буфера при переключении приложения: слово, набранное в одном
-        // приложении, не должно заменяться в другом (v0.2.23).
+        // приложении, не должно заменяться в другом (v0.2.23). Здесь же
+        // обновляем кэш frontmost bundle ID (v0.2.23) — чтобы per-keystroke
+        // проверки (isTerminalFocused, policy) не дёргали NSWorkspace.
         appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.bufferBox.buffer.reset()
+            guard let self else { return }
+            self.bufferBox.buffer.reset()
+            self.cachedFrontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         }
 
         let eventMask: CGEventMask =
@@ -175,6 +181,9 @@ final class KeyboardMonitor {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             appSwitchObserver = nil
         }
+        // Кэш frontmost-приложения больше недействителен после stop() —
+        // не используем чужой bundle ID при повторном start().
+        cachedFrontmostBundleIdentifier = nil
         eventTap = nil
         runLoopSource = nil
     }
@@ -522,7 +531,7 @@ final class KeyboardMonitor {
 
         // AppPolicy: для Electron-редакторов авто-замена разрешена
         // только если bundle ID в allow-list (Phase 4.1).
-        if let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+        if let bid = frontmostBundleIdentifier(),
            !policy.shouldAllowAutomaticReplacement(for: bid) {
             onDecision?(word, ConversionDecision(
                 outcome: .fallback(reason: .other("policy_denied:\(bid)")),
@@ -546,6 +555,9 @@ final class KeyboardMonitor {
         guard let focused = focusedAXElement() else { return }
 
         // Сохраняем фокус/приложение до замены, чтобы не действовать вслепую.
+        // Здесь намеренно прямое чтение NSWorkspace, а не кэш: подтверждение
+        // «приложение не сменилось за время замены» должно быть свежим, а путь
+        // конверсии (раз в слово) не горячий в отличие от per-keystroke проверок.
         let appBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let trustedBefore = AXIsProcessTrusted()
 
@@ -576,8 +588,17 @@ final class KeyboardMonitor {
 
     // MARK: - Helpers
 
+    /// Bundle ID активного приложения из кэша. Вызывается на каждое нажатие,
+    /// поэтому не дёргаем `NSWorkspace` каждый раз (v0.2.23).
+    private func frontmostBundleIdentifier() -> String? {
+        if cachedFrontmostBundleIdentifier == nil {
+            cachedFrontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+        return cachedFrontmostBundleIdentifier
+    }
+
     private func isTerminalFocused() -> Bool {
-        guard let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+        guard let bid = frontmostBundleIdentifier() else {
             return false
         }
         return Self.terminalBundleIdentifiers.contains(bid)
