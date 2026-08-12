@@ -1,5 +1,13 @@
 # RSW Refactoring and Improvement Plan
 
+> **Статус (v0.2.23, август 2026):** план в основном выполнен. Phase 1
+> (safety cleanup) и Phase 3 (decision diagnostics) закрыты; Phase 2
+> (архитектурный split) выполнен частично — `WordBuffer`, `AppPolicy`,
+> `AXTextReplacement` и `ConversionDecision` вынесены и покрыты тестами,
+> `KeyboardMonitor` остаётся координатором. Phase 4.1 (Electron allow-list)
+> реализован. Актуальное состояние и список изменений — в
+> [CHANGELOG.md](../CHANGELOG.md) и [README.md](../README.md).
+
 ## Context
 
 Current v0.2.17 prioritizes safety after log analysis showed two damaging classes of behavior:
