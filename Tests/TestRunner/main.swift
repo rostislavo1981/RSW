@@ -520,6 +520,40 @@ if let prevAllowedIds {
 }
 
 // ────────────────────────────────────────────────────────
+// 24. WordDictionary — асинхронное сохранение на диск (v0.2.23)
+//     add()/remove() не блокируют main: запись идёт на фоновой
+//     очереди. flushPendingWrites() синхронно дожидается её.
+// ────────────────────────────────────────────────────────
+print("━━━ 24. WordDictionary: async save + flush ━━━")
+
+let testDictDir = FileManager.default.temporaryDirectory
+    .appendingPathComponent("rsw-tests-\(UUID().uuidString)")
+let testDictURL = testDictDir.appendingPathComponent("words.json")
+let diskDict = WordDictionary(storageURL: testDictURL)
+
+diskDict.add("слон", language: .russian)
+diskDict.add("элефант", language: .russian)
+diskDict.flushPendingWrites()
+
+let reloadedAfterAdd = WordDictionary(storageURL: testDictURL)
+test("WD: слово сохранено на диск после add+flush") {
+    reloadedAfterAdd.isKnown("слон", language: .russian)
+}
+test("WD: второе слово тоже сохранено") {
+    reloadedAfterAdd.isKnown("элефант", language: .russian)
+}
+
+diskDict.remove("элефант", language: .russian)
+diskDict.flushPendingWrites()
+let reloadedAfterRemove = WordDictionary(storageURL: testDictURL)
+test("WD: remove тоже сохранил удаление") {
+    !reloadedAfterRemove.isKnown("элефант", language: .russian)
+        && reloadedAfterRemove.isKnown("слон", language: .russian)
+}
+
+try? FileManager.default.removeItem(at: testDictDir)
+
+// ────────────────────────────────────────────────────────
 // Отчёт
 // ────────────────────────────────────────────────────────
 
