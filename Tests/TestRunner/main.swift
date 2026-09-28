@@ -352,8 +352,9 @@ test("CB: 'qqq' → fallback (lowConfidence или no_conversion)") {
     return false
 }
 
-// v0.2.21: fallback через forceConvert + dictionary confirmation
-test("CB: 'руддщ' (RU) → auto 'hello' (через forceConvert fallback)") {
+// v0.2.23: эти пары проходят через обычный convert() (dict-confirmation),
+// fallback через forceConvert удалён как мёртвый и FP-опасный код.
+test("CB: 'руддщ' (RU) → auto 'hello'") {
     let decision = builder.buildDecision(from: "руддщ", sourceLang: .russian)
     if case .auto = decision?.outcome {
         return decision?.convertedText == "hello"
@@ -361,7 +362,7 @@ test("CB: 'руддщ' (RU) → auto 'hello' (через forceConvert fallback)"
     print("    [debug] decision=\(String(describing: decision))")
     return false
 }
-test("CB: 'ghbdtn' (EN) → auto 'привет' (через forceConvert fallback)") {
+test("CB: 'ghbdtn' (EN) → auto 'привет'") {
     let decision = builder.buildDecision(from: "ghbdtn", sourceLang: .english)
     if case .auto = decision?.outcome {
         return decision?.convertedText == "привет"
@@ -376,7 +377,7 @@ test("CB: 'ghbdtn' (EN) → auto 'привет' (через forceConvert fallbac
 print("━━━ 19. WordBuffer integration ━━━")
 
 test("WB: init → empty currentWord") {
-    var b = WordBuffer()
+    let b = WordBuffer()
     return b.currentWord.isEmpty
 }
 test("WB: append('h') + append('e') → 'he'") {
@@ -426,6 +427,147 @@ test("AP: on + list содержит → разрешает") {
 test("AP: on + list не содержит → запрещает") {
     return onPolicy.shouldAllowAutomaticReplacement(for: "com.apple.Safari") == false
 }
+
+// ────────────────────────────────────────────────────────
+// 21. AXTextReplacement — bounds guard (крэш-регрессия v0.2.23)
+//     replaceWordBeforeCursor падал с NSRangeException, когда курсор
+//     стоял ближе к началу строки, чем длина слова (wordStart < wordLength):
+//     replaceStart = wordStart - wordLength уходил в минус. Вынесенный
+//     helper должен возвращать nil вместо отрицательного range.
+// ────────────────────────────────────────────────────────
+print("━━━ 21. AXTextReplacement: bounds guard ━━━")
+
+test("AX: валидный range (wordStart=10, len=3, value=20)") {
+    AXTextReplacement.replacementRange(wordStart: 10, wordLength: 3, valueLength: 20) == NSRange(location: 7, length: 3)
+}
+test("AX: wordStart < wordLength → nil (крэш-сценарий)") {
+    AXTextReplacement.replacementRange(wordStart: 2, wordLength: 3, valueLength: 20) == nil
+}
+test("AX: wordStart > valueLength → nil") {
+    AXTextReplacement.replacementRange(wordStart: 25, wordLength: 3, valueLength: 20) == nil
+}
+test("AX: wordStart == valueLength → валиден (конец строки)") {
+    AXTextReplacement.replacementRange(wordStart: 20, wordLength: 3, valueLength: 20) == NSRange(location: 17, length: 3)
+}
+test("AX: wordStart=0, wordLength=0 → валиден") {
+    AXTextReplacement.replacementRange(wordStart: 0, wordLength: 0, valueLength: 0) == NSRange(location: 0, length: 0)
+}
+
+// ────────────────────────────────────────────────────────
+// 22. ConversionBuilder — FP-безопасность при minWordLength=2
+//     Fallback через forceConvert (v0.2.21) был мёртвым кодом при min=3
+//     (convert() сам проверяет словарь до скоринга), но при min=2 давал
+//     ложные авто-срабатывания: 'ша' → 'if', 'ру' → 'he', 'ше' → 'it'.
+//     Fallback удалён — эти слова не должны конвертироваться автоматически.
+// ────────────────────────────────────────────────────────
+print("━━━ 22. ConversionBuilder: FP-безопасность min=2 ━━━")
+
+let fpBuilder = ConversionBuilder(converter: builderConverter, dictionary: inMemoryDict, minWordLength: 2)
+
+test("CB: 'ша' (RU, min=2) → НЕ auto (FP 'ша'→'if')") {
+    if case .auto = fpBuilder.buildDecision(from: "ша", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: 'ру' (RU, min=2) → НЕ auto (FP 'ру'→'he')") {
+    if case .auto = fpBuilder.buildDecision(from: "ру", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: 'ше' (RU, min=2) → НЕ auto (FP 'ше'→'it')") {
+    if case .auto = fpBuilder.buildDecision(from: "ше", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+test("CB: minWordLength можно обновить после init (var)") {
+    let b = ConversionBuilder(converter: builderConverter, dictionary: inMemoryDict, minWordLength: 3)
+    b.minWordLength = 2
+    if case .auto = b.buildDecision(from: "ша", sourceLang: .russian)?.outcome {
+        return false
+    }
+    return true
+}
+
+// ────────────────────────────────────────────────────────
+// 23. AppSettings — инвариант allow-list (v0.2.23)
+//     Мёртвая миграция через dictionaryRepresentation() (зарегистрированные
+//     дефолты в неё попадают) не срабатывала никогда. Теперь инвариант
+//     «allow-list с пустым списком → off» применяется при загрузке настроек.
+// ────────────────────────────────────────────────────────
+print("━━━ 23. AppSettings: инвариант allow-list ━━━")
+
+let settingsDefaults = UserDefaults.standard
+let prevAllowList = settingsDefaults.bool(forKey: "enableElectronAllowList")
+let prevAllowedIds = settingsDefaults.stringArray(forKey: "electronAllowedIdentifiers")
+
+settingsDefaults.set(true, forKey: "enableElectronAllowList")
+settingsDefaults.set([], forKey: "electronAllowedIdentifiers")
+
+let settingsWithEmptyList = AppSettings()
+test("AP: allow-list true + пустой список → сброс в false при init") {
+    settingsWithEmptyList.enableElectronAllowList == false
+}
+
+// Восстанавливаем прежнее состояние, чтобы не влиять на другие тесты.
+settingsDefaults.set(prevAllowList, forKey: "enableElectronAllowList")
+if let prevAllowedIds {
+    settingsDefaults.set(prevAllowedIds, forKey: "electronAllowedIdentifiers")
+} else {
+    settingsDefaults.removeObject(forKey: "electronAllowedIdentifiers")
+}
+
+// ────────────────────────────────────────────────────────
+// 24. WordDictionary — асинхронное сохранение на диск (v0.2.23)
+//     add()/remove() не блокируют main: запись идёт на фоновой
+//     очереди. flushPendingWrites() синхронно дожидается её.
+// ────────────────────────────────────────────────────────
+print("━━━ 24. WordDictionary: async save + flush ━━━")
+
+let testDictDir = FileManager.default.temporaryDirectory
+    .appendingPathComponent("rsw-tests-\(UUID().uuidString)")
+let testDictURL = testDictDir.appendingPathComponent("words.json")
+let diskDict = WordDictionary(storageURL: testDictURL)
+
+diskDict.add("слон", language: .russian)
+diskDict.add("элефант", language: .russian)
+diskDict.flushPendingWrites()
+
+let reloadedAfterAdd = WordDictionary(storageURL: testDictURL)
+test("WD: слово сохранено на диск после add+flush") {
+    reloadedAfterAdd.isKnown("слон", language: .russian)
+}
+test("WD: второе слово тоже сохранено") {
+    reloadedAfterAdd.isKnown("элефант", language: .russian)
+}
+
+diskDict.remove("элефант", language: .russian)
+diskDict.flushPendingWrites()
+let reloadedAfterRemove = WordDictionary(storageURL: testDictURL)
+test("WD: remove тоже сохранил удаление") {
+    !reloadedAfterRemove.isKnown("элефант", language: .russian)
+        && reloadedAfterRemove.isKnown("слон", language: .russian)
+}
+
+try? FileManager.default.removeItem(at: testDictDir)
+
+// ────────────────────────────────────────────────────────
+// 25. TerminalApps — список терминалов и предикат (v0.2.23)
+//     Список вынесен в SwitcherCore, чтобы проверять его в TestRunner:
+//     известные терминалы распознаются, обычные приложения — нет.
+// ────────────────────────────────────────────────────────
+print("━━━ 25. TerminalApps: список терминалов ━━━")
+
+test("TAP: com.apple.Terminal — терминал") { TerminalApps.isTerminal("com.apple.Terminal") }
+test("TAP: iTerm2 — терминал") { TerminalApps.isTerminal("com.googlecode.iterm2") }
+test("TAP: Ghostty — терминал") { TerminalApps.isTerminal("com.mitchellh.ghostty") }
+test("TAP: Kitty — терминал") { TerminalApps.isTerminal("net.kovidgoyal.kitty") }
+test("TAP: Alacritty — терминал") { TerminalApps.isTerminal("org.alacritty") }
+test("TAP: Warp — терминал") { TerminalApps.isTerminal("dev.warp.Warp") }
+test("TAP: обычное приложение — не терминал") { !TerminalApps.isTerminal("com.apple.Safari") }
+test("TAP: пустая строка — не терминал") { !TerminalApps.isTerminal("") }
 
 // ────────────────────────────────────────────────────────
 // Отчёт

@@ -130,7 +130,11 @@ class KeyRecorderView: NSView {
     override func becomeFirstResponder() -> Bool {
         super.becomeFirstResponder()
         guard monitor == nil else { return true }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        // [weak self] — разрывает retain cycle `view → monitor → handler → view`.
+        // Без этого view не деаллоцируется, пока не нажата клавиша, и монитор
+        // «застревает», проглатывая следующее нажатие в приложении.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
             let code = Int(event.keyCode)
             let mods = Int(event.modifierFlags.rawValue & UInt(NSEvent.ModifierFlags.deviceIndependentFlagsMask.rawValue))
             NotificationCenter.default.post(
@@ -138,13 +142,32 @@ class KeyRecorderView: NSView {
                 object: nil,
                 userInfo: ["keyCode": code, "modifiers": mods]
             )
-            if let m = self.monitor {
-                NSEvent.removeMonitor(m)
-                self.monitor = nil
-            }
+            self.stopRecording()
             return nil
         }
         return true
+    }
+
+    /// Снимает монитор (идемпотентно). Вызывается после записи клавиши,
+    /// при потере фокуса, при удалении из окна и в `deinit` — монитор
+    /// никогда не «застревает» и не проглатывает следующее нажатие.
+    func stopRecording() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    override func resignFirstResponder() -> Bool {
+        stopRecording()
+        return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stopRecording()
+        }
     }
 
     func makeKey() {
@@ -152,7 +175,7 @@ class KeyRecorderView: NSView {
     }
 
     deinit {
-        if let monitor { NSEvent.removeMonitor(monitor) }
+        stopRecording()
     }
 }
 

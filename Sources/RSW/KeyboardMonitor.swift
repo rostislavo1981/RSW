@@ -13,16 +13,19 @@ final class KeyboardMonitor {
     /// keyCode клавиш, которые не сбрасывают текущее слово (Shift, Caps Lock и т. п.).
     private static let defaultExcludedKeyCodes: Set<Int> = [56, 60, 61, 57]
 
+    /// Навигационные клавиши (стрелки, Home/End/PageUp/PageDown). При их нажатии
+    /// курсор уходит из текущего слова, и буфер больше не соответствует позиции —
+    /// сбрасываем, чтобы не заменить не то слово (v0.2.23).
+    private static let navigationKeyCodes: Set<Int> = [123, 124, 125, 126, 115, 119, 116, 121]
+
+    /// Максимальная длина буферизуемого слова. Защита от автоповтора клавиши:
+    /// удерживание буквы не должно копить сотни символов в буфере.
+    private static let maxBufferedWordLength = 64
+
     /// Терминалы, в которых RSW не работает (pass‑through).
-    private static let terminalBundleIdentifiers: Set<String> = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "dev.warp.Warp-Stable",
-        "dev.warp.Warp",
-        "com.mitchellh.ghostty",
-        "net.kovidgoyal.kitty",
-        "org.alacritty"
-    ]
+    /// Список и предикат живут в `SwitcherCore.TerminalApps` (тестируется в
+    /// TestRunner); здесь только обращение к ним.
+    private static let terminalBundleIdentifiers: Set<String> = TerminalApps.bundleIdentifiers
 
     // MARK: - Состояние
 
@@ -57,11 +60,18 @@ final class KeyboardMonitor {
     /// `.other("policy_denied")` и т. п.
     var onDecision: ((String, ConversionDecision) -> Void)?
 
-    /// Флаг активного автопереключения (привязан к настройке).
-    var isEnabled: Bool = true
+    /// Флаг активного автопереключения — живое зеркало настройки
+    /// `AppSettings.autoSwitchEnabled` (паттерн v0.2.2, восстановлен в v0.2.23).
+    /// Раньше это была отдельная stored property, и переключатель в меню
+    /// расходился с настройкой в окне «Настройки».
+    var isEnabled: Bool {
+        get { settings.autoSwitchEnabled }
+        set { settings.autoSwitchEnabled = newValue }
+    }
 
-    /// Минимальная длина слова для конвертации.
-    private let minWordLength: Int
+    /// Минимальная длина слова для конвертации — читается из настроек в момент
+    /// использования, чтобы изменение в UI применялось сразу, без перезапуска.
+    private var minWordLength: Int { settings.minWordLength }
 
     // MARK: - Зависимости
 
@@ -76,19 +86,27 @@ final class KeyboardMonitor {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    /// Observer переключения активного приложения — сбрасывает буфер слова
+    /// и обновляет кэш frontmost-приложения.
+    private var appSwitchObserver: NSObjectProtocol?
+
+    /// Кэш bundle ID активного приложения. `NSWorkspace.shared.frontmostApplication` —
+    /// дорогой системный запрос, а он нужен на КАЖДОЕ нажатие (isTerminalFocused,
+    /// policy-проверка). Кэшируем при первом использовании и обновляем только
+    /// по `didActivateApplicationNotification`. Доступ только с main (event tap
+    /// и observer оба на main run loop) — лок не нужен.
+    private var cachedFrontmostBundleIdentifier: String?
 
     // MARK: - Init
 
-    init(minWordLength: Int = 3,
-         settings: AppSettings = .shared,
+    init(settings: AppSettings = .shared,
          policy: AppPolicy = DefaultAppPolicy(settings: AppSettings.shared)) {
-        self.minWordLength = minWordLength
         self.settings = settings
         self.policy = policy
         self.decisionBuilder = ConversionBuilder(
             converter: LayoutConverter(dictionary: .shared),
             dictionary: .shared,
-            minWordLength: minWordLength
+            minWordLength: settings.minWordLength
         )
     }
 
@@ -96,6 +114,23 @@ final class KeyboardMonitor {
 
     @discardableResult
     func start() -> Bool {
+        // Защита от повторного вызова: не создаём второй event tap.
+        guard eventTap == nil else { return true }
+
+        // Сброс буфера при переключении приложения: слово, набранное в одном
+        // приложении, не должно заменяться в другом (v0.2.23). Здесь же
+        // обновляем кэш frontmost bundle ID (v0.2.23) — чтобы per-keystroke
+        // проверки (isTerminalFocused, policy) не дёргали NSWorkspace.
+        appSwitchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.bufferBox.buffer.reset()
+            self.cachedFrontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+
         let eventMask: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.flagsChanged.rawValue)
@@ -105,7 +140,13 @@ final class KeyboardMonitor {
             guard let refcon else { return nil }
             let monitor = Unmanaged<KeyboardMonitor>.fromOpaque(refcon).takeUnretainedValue()
             if let result = monitor.handle(eventType: type, event: event) {
-                return Unmanaged.passRetained(result)
+                // Контракт CGEventTapCallBack (CGEventTypes.h:441-449): переданное
+                // событие освобождается вызывающим кодом; passRetained нужен только
+                // для НОВОГО события. handle() всегда возвращает тот же event —
+                // passRetained здесь утекал бы +1 retain на каждое нажатие (v0.2.23).
+                return result === event
+                    ? Unmanaged.passUnretained(result)
+                    : Unmanaged.passRetained(result)
             }
             return nil
         }
@@ -136,6 +177,13 @@ final class KeyboardMonitor {
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
+        if let observer = appSwitchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            appSwitchObserver = nil
+        }
+        // Кэш frontmost-приложения больше недействителен после stop() —
+        // не используем чужой bundle ID при повторном start().
+        cachedFrontmostBundleIdentifier = nil
         eventTap = nil
         runLoopSource = nil
     }
@@ -196,6 +244,14 @@ final class KeyboardMonitor {
             return event
         }
 
+        // Навигационные клавиши (стрелки, Home/End/PageUp/PageDown) сбрасывают
+        // текущее слово — курсор ушёл, буфер больше не соответствует позиции.
+        // Проверяем ДО hasCmd/hasCtrl: Cmd+стрелка тоже двигает курсор.
+        if Self.navigationKeyCodes.contains(keyCode) {
+            bufferBox.buffer.reset()
+            return event
+        }
+
         // С модификаторами (Cmd/Ctrl) не вмешиваемся.
         if hasCmd || hasCtrl { return event }
 
@@ -211,7 +267,13 @@ final class KeyboardMonitor {
 
         // Обычный символ — добавляем в буфер, если это буква.
         if let ch = chars.first, ch.isLetter {
-            bufferBox.buffer.append(ch)
+            // Кап на длину буфера (v0.2.23): автоповтор клавиши не должен
+            // копить сотни символов. Слишком длинное «слово» — не слово.
+            if bufferBox.buffer.currentWord.count >= Self.maxBufferedWordLength {
+                bufferBox.buffer.reset()
+            } else {
+                bufferBox.buffer.append(ch)
+            }
         } else if !chars.isEmpty {
             // Не‑буквенный символ (цифра, пунктуация) сбрасывает буфер.
             bufferBox.buffer.reset()
@@ -361,8 +423,6 @@ final class KeyboardMonitor {
         }
 
         let wordLength = (word as NSString).length
-        let wordRange = NSRange(location: selectedRange.location - wordLength,
-                                length: wordLength)
         let ok = AXTextReplacement(
             focusedElementProvider: { focused },
             selectedRangeProvider: { element in self.selectedTextRange(in: element) },
@@ -383,7 +443,6 @@ final class KeyboardMonitor {
             ))
             return
         }
-        _ = wordRange  // silence unused warning (используется косвенно через replaceWordBeforeCursor)
         inputSources.select(conversion.language)
         onCorrection?(word, conversion.text, conversion.language)
     }
@@ -456,6 +515,8 @@ final class KeyboardMonitor {
         let sourceLang: KeyboardLanguage = word.allSatisfy({ LayoutConverter.isRussianCharacter($0) })
             ? .russian
             : .english
+        // Синхронизируем builder с живой настройкой minWordLength (v0.2.23).
+        decisionBuilder.minWordLength = minWordLength
         let decision = decisionBuilder.buildDecision(from: word, sourceLang: sourceLang)
         onDecision?(word, decision ?? ConversionDecision(
             outcome: .fallback(reason: .other("empty")),
@@ -470,7 +531,7 @@ final class KeyboardMonitor {
 
         // AppPolicy: для Electron-редакторов авто-замена разрешена
         // только если bundle ID в allow-list (Phase 4.1).
-        if let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+        if let bid = frontmostBundleIdentifier(),
            !policy.shouldAllowAutomaticReplacement(for: bid) {
             onDecision?(word, ConversionDecision(
                 outcome: .fallback(reason: .other("policy_denied:\(bid)")),
@@ -494,6 +555,9 @@ final class KeyboardMonitor {
         guard let focused = focusedAXElement() else { return }
 
         // Сохраняем фокус/приложение до замены, чтобы не действовать вслепую.
+        // Здесь намеренно прямое чтение NSWorkspace, а не кэш: подтверждение
+        // «приложение не сменилось за время замены» должно быть свежим, а путь
+        // конверсии (раз в слово) не горячий в отличие от per-keystroke проверок.
         let appBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let trustedBefore = AXIsProcessTrusted()
 
@@ -524,8 +588,17 @@ final class KeyboardMonitor {
 
     // MARK: - Helpers
 
+    /// Bundle ID активного приложения из кэша. Вызывается на каждое нажатие,
+    /// поэтому не дёргаем `NSWorkspace` каждый раз (v0.2.23).
+    private func frontmostBundleIdentifier() -> String? {
+        if cachedFrontmostBundleIdentifier == nil {
+            cachedFrontmostBundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+        return cachedFrontmostBundleIdentifier
+    }
+
     private func isTerminalFocused() -> Bool {
-        guard let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+        guard let bid = frontmostBundleIdentifier() else {
             return false
         }
         return Self.terminalBundleIdentifiers.contains(bid)

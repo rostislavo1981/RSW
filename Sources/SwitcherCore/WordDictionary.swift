@@ -7,6 +7,10 @@ public final class WordDictionary {
     private var russianWords: Set<String>
     private let storageURL: URL?
     private let lock = NSLock()
+    /// Серийная очередь для записи на диск. Сериализация JSON и I/O
+    /// выполняются здесь, чтобы не блокировать main-поток (на нём работает
+    /// event tap и UI). Очередь серийная — порядок записей сохраняется.
+    private let saveQueue = DispatchQueue(label: "rsw.dictionary.save")
 
     public var englishCount: Int { lock.withLock { englishWords.count } }
     public var russianCount: Int { lock.withLock { russianWords.count } }
@@ -65,8 +69,8 @@ public final class WordDictionary {
             case .english: englishWords.insert(lower)
             case .russian: russianWords.insert(lower)
             }
-            saveToDisk()
         }
+        saveToDisk()
     }
 
     public func remove(_ word: String, language: KeyboardLanguage) {
@@ -76,23 +80,36 @@ public final class WordDictionary {
             case .english: englishWords.remove(lower)
             case .russian: russianWords.remove(lower)
             }
-            saveToDisk()
         }
+        saveToDisk()
+    }
+
+    /// Синхронно дожидается завершения всех отложенных записей на диск.
+    /// Вызывать перед завершением приложения (`applicationWillTerminate`),
+    /// чтобы последнее добавленное слово гарантированно сохранилось.
+    public func flushPendingWrites() {
+        saveQueue.sync {}
     }
 
     private func saveToDisk() {
         guard let storageURL else { return }
 
-        let data: [String: [String]] = [
-            "english": Array(englishWords).sorted(),
-            "russian": Array(russianWords).sorted()
-        ]
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: data, options: .prettyPrinted) else { return }
-        try? FileManager.default.createDirectory(
-            at: storageURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? jsonData.write(to: storageURL, options: .atomic)
+        // Снимок множеств под локом (дёшево). Сериализацию и запись на диск
+        // выполняем на фоновой очереди — не блокируем main.
+        let snapshot: [String: [String]] = lock.withLock {
+            [
+                "english": Array(englishWords).sorted(),
+                "russian": Array(russianWords).sorted()
+            ]
+        }
+        saveQueue.async {
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: snapshot, options: .prettyPrinted) else { return }
+            try? FileManager.default.createDirectory(
+                at: storageURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? jsonData.write(to: storageURL, options: .atomic)
+        }
     }
 
     private static func loadFromDisk(_ url: URL) -> (english: Set<String>, russian: Set<String>) {
